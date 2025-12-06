@@ -2,6 +2,7 @@ server:
   listen: "127.0.0.1:5353"
   workers: 4
   log_level: debug
+  # rate_limit: 100  # Optional: queries per second per IP
 
 zones:
   - name: example.com.

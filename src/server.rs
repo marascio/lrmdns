@@ -1,4 +1,6 @@
+use crate::metrics::Metrics;
 use crate::protocol::QueryProcessor;
+use crate::ratelimit::RateLimiter;
 use anyhow::{Context, Result};
 use hickory_proto::op::Message;
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
@@ -12,13 +14,22 @@ const MAX_TCP_DNS_PACKET_SIZE: usize = 65535;
 pub struct DnsServer {
     processor: Arc<QueryProcessor>,
     listen_addr: String,
+    metrics: Arc<Metrics>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl DnsServer {
-    pub fn new(processor: QueryProcessor, listen_addr: String) -> Self {
+    pub fn new(
+        processor: QueryProcessor,
+        listen_addr: String,
+        metrics: Arc<Metrics>,
+        rate_limiter: Option<Arc<RateLimiter>>,
+    ) -> Self {
         DnsServer {
             processor: Arc::new(processor),
             listen_addr,
+            metrics,
+            rate_limiter,
         }
     }
 
@@ -49,9 +60,12 @@ impl DnsServer {
                     let processor = self.processor.clone();
                     let socket = socket.clone();
 
+                    let metrics = self.metrics.clone();
+                    let rate_limiter = self.rate_limiter.clone();
+
                     // Spawn a task to handle the query
                     tokio::spawn(async move {
-                        if let Err(e) = handle_udp_query(data, addr, processor, socket).await {
+                        if let Err(e) = handle_udp_query(data, addr, processor, socket, metrics, rate_limiter).await {
                             tracing::error!("Error handling UDP query from {}: {}", addr, e);
                         }
                     });
@@ -74,10 +88,12 @@ impl DnsServer {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     let processor = self.processor.clone();
+                    let metrics = self.metrics.clone();
+                    let rate_limiter = self.rate_limiter.clone();
 
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
-                        if let Err(e) = handle_tcp_connection(stream, addr, processor).await {
+                        if let Err(e) = handle_tcp_connection(stream, addr, processor, metrics, rate_limiter).await {
                             tracing::error!("Error handling TCP connection from {}: {}", addr, e);
                         }
                     });
@@ -95,11 +111,41 @@ async fn handle_udp_query(
     addr: std::net::SocketAddr,
     processor: Arc<QueryProcessor>,
     socket: Arc<UdpSocket>,
+    metrics: Arc<Metrics>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<()> {
+    use crate::metrics::Protocol;
+    use std::time::Instant;
+
+    let start = Instant::now();
+
+    // Check rate limiting
+    if let Some(ref limiter) = rate_limiter {
+        if !limiter.check_rate_limit(addr.ip()) {
+            metrics.record_rate_limited();
+            tracing::warn!("Rate limited query from {}", addr);
+
+            // Send REFUSED response
+            let mut response = Message::new();
+            if data.len() >= 2 {
+                let id = u16::from_be_bytes([data[0], data[1]]);
+                response.set_id(id);
+            }
+            response.set_message_type(hickory_proto::op::MessageType::Response);
+            response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+
+            let response_buf = response.to_bytes()
+                .context("Failed to encode rate limit response")?;
+            socket.send_to(&response_buf, addr).await?;
+            return Ok(());
+        }
+    }
+
     // Parse the DNS query
     let query = match Message::from_bytes(&data) {
         Ok(msg) => msg,
         Err(e) => {
+            metrics.record_error();
             tracing::warn!("Failed to parse DNS query from {}: {}", addr, e);
 
             // Send FORMERR response
@@ -111,12 +157,25 @@ async fn handle_udp_query(
             response.set_message_type(hickory_proto::op::MessageType::Response);
             response.set_response_code(hickory_proto::op::ResponseCode::FormErr);
 
+            metrics.record_response(hickory_proto::op::ResponseCode::FormErr);
+
             let response_buf = response.to_bytes()
                 .context("Failed to encode FORMERR response")?;
             socket.send_to(&response_buf, addr).await?;
+
+            metrics.record_latency(start.elapsed());
             return Ok(());
         }
     };
+
+    // Record query metrics
+    let has_edns = query.extensions().is_some();
+    metrics.record_query(Protocol::Udp, has_edns);
+
+    // Record query type if we have questions
+    if let Some(question) = query.queries().first() {
+        metrics.record_query_type(question.query_type());
+    }
 
     tracing::debug!(
         "Received query from {}: id={} questions={}",
@@ -126,7 +185,14 @@ async fn handle_udp_query(
     );
 
     // Process the query
-    let response = processor.process_query(&query)?;
+    let response = match processor.process_query(&query).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            metrics.record_error();
+            metrics.record_latency(start.elapsed());
+            return Err(e);
+        }
+    };
 
     // Encode the response
     let response_buf = response.to_bytes()
@@ -156,6 +222,8 @@ async fn handle_udp_query(
             let buf = truncated.to_bytes()?;
             if buf.len() <= max_udp_size {
                 socket.send_to(&buf, addr).await?;
+                metrics.record_response(truncated.response_code());
+                metrics.record_latency(start.elapsed());
                 return Ok(());
             }
         }
@@ -163,6 +231,10 @@ async fn handle_udp_query(
 
     // Send the response
     socket.send_to(&response_buf, addr).await?;
+
+    // Record metrics
+    metrics.record_response(response.response_code());
+    metrics.record_latency(start.elapsed());
 
     tracing::debug!(
         "Sent response to {}: id={} rcode={:?} answers={}",
@@ -179,10 +251,16 @@ async fn handle_tcp_connection(
     mut stream: TcpStream,
     addr: std::net::SocketAddr,
     processor: Arc<QueryProcessor>,
+    metrics: Arc<Metrics>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<()> {
+    use crate::metrics::Protocol;
+    use std::time::Instant;
+
     tracing::debug!("TCP connection from {}", addr);
 
     loop {
+        let start = Instant::now();
         // Read 2-byte length prefix
         let mut len_buf = [0u8; 2];
         match stream.read_exact(&mut len_buf).await {
@@ -200,8 +278,34 @@ async fn handle_tcp_connection(
         let msg_len = u16::from_be_bytes(len_buf) as usize;
 
         if msg_len == 0 || msg_len > MAX_TCP_DNS_PACKET_SIZE {
+            metrics.record_error();
             tracing::warn!("Invalid TCP DNS message length from {}: {}", addr, msg_len);
             return Ok(());
+        }
+
+        // Check rate limiting
+        if let Some(ref limiter) = rate_limiter {
+            if !limiter.check_rate_limit(addr.ip()) {
+                metrics.record_rate_limited();
+                tracing::warn!("Rate limited TCP query from {}", addr);
+
+                // Send REFUSED response
+                let mut response = Message::new();
+                response.set_message_type(hickory_proto::op::MessageType::Response);
+                response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+
+                metrics.record_response(hickory_proto::op::ResponseCode::Refused);
+
+                let response_buf = response.to_bytes()
+                    .context("Failed to encode rate limit response")?;
+
+                let len = (response_buf.len() as u16).to_be_bytes();
+                stream.write_all(&len).await?;
+                stream.write_all(&response_buf).await?;
+
+                metrics.record_latency(start.elapsed());
+                return Ok(());
+            }
         }
 
         // Read the DNS message
@@ -219,6 +323,7 @@ async fn handle_tcp_connection(
         let query = match Message::from_bytes(&msg_buf) {
             Ok(msg) => msg,
             Err(e) => {
+                metrics.record_error();
                 tracing::warn!("Failed to parse TCP DNS query from {}: {}", addr, e);
 
                 // Send FORMERR response
@@ -230,6 +335,8 @@ async fn handle_tcp_connection(
                 response.set_message_type(hickory_proto::op::MessageType::Response);
                 response.set_response_code(hickory_proto::op::ResponseCode::FormErr);
 
+                metrics.record_response(hickory_proto::op::ResponseCode::FormErr);
+
                 let response_buf = response.to_bytes()
                     .context("Failed to encode FORMERR response")?;
 
@@ -237,12 +344,30 @@ async fn handle_tcp_connection(
                 let len = (response_buf.len() as u16).to_be_bytes();
                 stream.write_all(&len).await?;
                 stream.write_all(&response_buf).await?;
+
+                metrics.record_latency(start.elapsed());
                 return Ok(());
             }
         };
 
+        // Record query metrics
+        let has_edns = query.extensions().is_some();
+        metrics.record_query(Protocol::Tcp, has_edns);
+
+        // Record query type if we have questions
+        if let Some(question) = query.queries().first() {
+            metrics.record_query_type(question.query_type());
+        }
+
         // Process the query
-        let response = processor.process_query(&query)?;
+        let response = match processor.process_query(&query).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                metrics.record_error();
+                metrics.record_latency(start.elapsed());
+                return Err(e);
+            }
+        };
 
         // Encode the response
         let response_buf = response.to_bytes()
@@ -261,6 +386,10 @@ async fn handle_tcp_connection(
         let len = (response_buf.len() as u16).to_be_bytes();
         stream.write_all(&len).await?;
         stream.write_all(&response_buf).await?;
+
+        // Record metrics
+        metrics.record_response(response.response_code());
+        metrics.record_latency(start.elapsed());
     }
 }
 
@@ -272,6 +401,7 @@ mod tests {
     use hickory_proto::rr::{Name, RData, Record, RecordType};
     use std::net::Ipv4Addr;
     use std::str::FromStr;
+    use tokio::sync::RwLock;
 
     fn create_test_processor() -> QueryProcessor {
         let origin = Name::from_str("test.local.").unwrap();
@@ -297,7 +427,7 @@ mod tests {
         let mut store = ZoneStore::new();
         store.add_zone(zone);
 
-        QueryProcessor::new(Arc::new(store))
+        QueryProcessor::new(Arc::new(RwLock::new(store)))
     }
 
     #[tokio::test]
@@ -313,7 +443,7 @@ mod tests {
             RecordType::A,
         ));
 
-        let response = processor.process_query(&query).unwrap();
+        let response = processor.process_query(&query).await.unwrap();
 
         assert_eq!(response.id(), 1234);
         assert!(response.authoritative());

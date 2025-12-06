@@ -18,6 +18,9 @@ pub struct ServerConfig {
 
     #[serde(default = "default_log_level")]
     pub log_level: String,
+
+    #[serde(default)]
+    pub rate_limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

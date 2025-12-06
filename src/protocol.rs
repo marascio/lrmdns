@@ -3,17 +3,18 @@ use anyhow::Result;
 use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::RecordType;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub struct QueryProcessor {
-    zones: Arc<ZoneStore>,
+    zones: Arc<RwLock<ZoneStore>>,
 }
 
 impl QueryProcessor {
-    pub fn new(zones: Arc<ZoneStore>) -> Self {
+    pub fn new(zones: Arc<RwLock<ZoneStore>>) -> Self {
         QueryProcessor { zones }
     }
 
-    pub fn process_query(&self, query: &Message) -> Result<Message> {
+    pub async fn process_query(&self, query: &Message) -> Result<Message> {
         let mut response = Message::new();
 
         // Copy query ID and set response flags
@@ -61,7 +62,8 @@ impl QueryProcessor {
         );
 
         // Find the authoritative zone
-        let zone = match self.zones.find_zone(qname) {
+        let zones = self.zones.read().await;
+        let zone = match zones.find_zone(qname) {
             Some(z) => z,
             None => {
                 // Not authoritative for this zone
@@ -203,11 +205,11 @@ mod tests {
         zone
     }
 
-    #[test]
-    fn test_successful_query() {
+    #[tokio::test]
+    async fn test_successful_query() {
         let mut store = ZoneStore::new();
         store.add_zone(create_test_zone());
-        let processor = QueryProcessor::new(Arc::new(store));
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
 
         let mut query = Message::new();
         query.set_id(1234);
@@ -218,7 +220,7 @@ mod tests {
             RecordType::A,
         ));
 
-        let response = processor.process_query(&query).unwrap();
+        let response = processor.process_query(&query).await.unwrap();
 
         assert_eq!(response.id(), 1234);
         assert_eq!(response.response_code(), ResponseCode::NoError);
@@ -226,11 +228,11 @@ mod tests {
         assert_eq!(response.answers().len(), 1);
     }
 
-    #[test]
-    fn test_nxdomain_query() {
+    #[tokio::test]
+    async fn test_nxdomain_query() {
         let mut store = ZoneStore::new();
         store.add_zone(create_test_zone());
-        let processor = QueryProcessor::new(Arc::new(store));
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
 
         let mut query = Message::new();
         query.set_id(5678);
@@ -239,18 +241,18 @@ mod tests {
             RecordType::A,
         ));
 
-        let response = processor.process_query(&query).unwrap();
+        let response = processor.process_query(&query).await.unwrap();
 
         assert_eq!(response.response_code(), ResponseCode::NXDomain);
         assert!(response.authoritative());
         assert_eq!(response.answers().len(), 0);
     }
 
-    #[test]
-    fn test_refused_query() {
+    #[tokio::test]
+    async fn test_refused_query() {
         let mut store = ZoneStore::new();
         store.add_zone(create_test_zone());
-        let processor = QueryProcessor::new(Arc::new(store));
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
 
         let mut query = Message::new();
         query.add_query(Query::query(
@@ -258,7 +260,7 @@ mod tests {
             RecordType::A,
         ));
 
-        let response = processor.process_query(&query).unwrap();
+        let response = processor.process_query(&query).await.unwrap();
 
         assert_eq!(response.response_code(), ResponseCode::Refused);
     }
