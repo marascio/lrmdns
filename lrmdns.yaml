@@ -1,0 +1,8 @@
+server:
+  listen: "127.0.0.1:5353"
+  workers: 4
+  log_level: debug
+
+zones:
+  - name: example.com.
+    file: zones/example.com.zone
