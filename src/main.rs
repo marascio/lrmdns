@@ -1,3 +1,4 @@
+mod api;
 mod config;
 mod metrics;
 mod protocol;
@@ -69,6 +70,24 @@ async fn main() -> Result<()> {
     );
 
     tracing::info!("DNS server starting on {}", config.server.listen);
+
+    // Start HTTP API server if configured
+    if let Some(api_listen) = &config.server.api_listen {
+        let api_app = api::create_router(metrics.clone());
+        let api_listen = api_listen.clone();
+
+        tokio::spawn(async move {
+            let listener = tokio::net::TcpListener::bind(&api_listen)
+                .await
+                .expect("Failed to bind API server");
+
+            tracing::info!("HTTP API server listening on {}", api_listen);
+
+            axum::serve(listener, api_app)
+                .await
+                .expect("API server failed");
+        });
+    }
 
     // Set up signal handlers
     let config_for_reload = config.clone();

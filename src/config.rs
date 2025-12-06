@@ -21,6 +21,9 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub rate_limit: Option<u32>,
+
+    #[serde(default)]
+    pub api_listen: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
