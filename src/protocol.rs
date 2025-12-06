@@ -77,19 +77,17 @@ impl QueryProcessor {
         response.set_authoritative(true);
 
         // Check if the name exists in the zone
-        if !zone.contains_name(qname) {
-            // Name doesn't exist - NXDOMAIN
-            response.set_response_code(ResponseCode::NXDomain);
-
-            // Add SOA record in authority section for negative caching
-            response.add_name_server(zone.get_soa_record());
-
-            tracing::debug!("Name not found: {}", qname);
-            return Ok(response);
-        }
+        let name_exists = zone.contains_name(qname);
 
         // Lookup the requested record type
-        match zone.lookup(qname, qtype) {
+        let lookup_result = if name_exists {
+            zone.lookup(qname, qtype)
+        } else {
+            // Try wildcard lookup if exact name doesn't exist
+            zone.lookup_wildcard(qname, qtype)
+        };
+
+        match lookup_result {
             Some(records) => {
                 // Found records of the requested type
                 for record in records {
@@ -99,8 +97,14 @@ impl QueryProcessor {
                 tracing::debug!("Found {} records for {} {:?}", records.len(), qname, qtype);
             }
             None => {
-                // Check if there's a CNAME record for this name
-                if let Some(cname_records) = zone.lookup(qname, RecordType::CNAME) {
+                // Check if there's a CNAME record for this name (exact or wildcard)
+                let cname_result = if name_exists {
+                    zone.lookup(qname, RecordType::CNAME)
+                } else {
+                    zone.lookup_wildcard(qname, RecordType::CNAME)
+                };
+
+                if let Some(cname_records) = cname_result {
                     // Add CNAME record(s) to answer
                     for cname_record in cname_records {
                         response.add_answer(cname_record.clone());
@@ -127,7 +131,7 @@ impl QueryProcessor {
                         }
                     }
                     response.set_response_code(ResponseCode::NoError);
-                } else {
+                } else if name_exists {
                     // Name exists but no record of this type and no CNAME
                     response.set_response_code(ResponseCode::NoError);
 
@@ -135,6 +139,14 @@ impl QueryProcessor {
                     response.add_name_server(zone.get_soa_record());
 
                     tracing::debug!("Name exists but no {:?} record: {}", qtype, qname);
+                } else {
+                    // Name doesn't exist and no wildcard match - NXDOMAIN
+                    response.set_response_code(ResponseCode::NXDomain);
+
+                    // Add SOA record in authority section for negative caching
+                    response.add_name_server(zone.get_soa_record());
+
+                    tracing::debug!("Name not found (no wildcard match): {}", qname);
                 }
             }
         }
@@ -263,5 +275,90 @@ mod tests {
         let response = processor.process_query(&query).await.unwrap();
 
         assert_eq!(response.response_code(), ResponseCode::Refused);
+    }
+
+    #[tokio::test]
+    async fn test_wildcard_query() {
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 2025120601,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let mut zone = Zone::new(origin.clone(), soa);
+
+        // Add wildcard A record
+        let wildcard_record = Record::from_rdata(
+            Name::from_str("*.example.com.").unwrap(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 100))),
+        );
+        zone.add_record(wildcard_record);
+
+        // Add specific record that should override wildcard
+        let www_record = Record::from_rdata(
+            Name::from_str("www.example.com.").unwrap(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 10))),
+        );
+        zone.add_record(www_record);
+
+        // Add NS record for authority section
+        let ns_record = Record::from_rdata(
+            origin.clone(),
+            3600,
+            RData::NS(hickory_proto::rr::rdata::NS(
+                Name::from_str("ns1.example.com.").unwrap(),
+            )),
+        );
+        zone.add_record(ns_record);
+
+        let mut store = ZoneStore::new();
+        store.add_zone(zone);
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        // Test wildcard match for non-existent name
+        let mut query = Message::new();
+        query.set_id(1111);
+        query.add_query(Query::query(
+            Name::from_str("random.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 1111);
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+        assert!(response.authoritative());
+        assert_eq!(response.answers().len(), 1);
+
+        // Verify the answer is the wildcard IP
+        if let Some(RData::A(a)) = response.answers()[0].data() {
+            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 100));
+        }
+
+        // Test that specific record overrides wildcard
+        let mut query = Message::new();
+        query.set_id(2222);
+        query.add_query(Query::query(
+            Name::from_str("www.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 2222);
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+        assert_eq!(response.answers().len(), 1);
+
+        // Verify the answer is the specific IP, not wildcard
+        if let Some(RData::A(a)) = response.answers()[0].data() {
+            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10));
+        }
     }
 }
