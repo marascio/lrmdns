@@ -6,16 +6,24 @@ A simple, fast, and reliable authoritative-only DNS server written in Rust.
 
 lrmdns is an authoritative DNS server that responds to queries for domains it manages. It does NOT perform recursive resolution or caching - it only serves zones that are explicitly configured.
 
-## Features (Phase 1 - MVP)
+## Features
 
-✅ **Authoritative DNS responses** for configured zones
-✅ **UDP server** on configurable port
-✅ **Standard DNS record types**: A, AAAA, NS, SOA
-✅ **RFC 1035 zone file format** support
-✅ **YAML configuration** for easy setup
-✅ **Structured logging** with tracing
-✅ **Async I/O** using tokio for high concurrency
-✅ **Proper DNS error responses**: NXDOMAIN, REFUSED, FORMERR, NOERROR
+### Phase 1 (MVP) - ✅ Complete
+- **Authoritative DNS responses** for configured zones
+- **UDP server** on configurable port
+- **Standard DNS record types**: A, AAAA, NS, SOA
+- **RFC 1035 zone file format** support
+- **YAML configuration** for easy setup
+- **Structured logging** with tracing
+- **Async I/O** using tokio for high concurrency
+- **Proper DNS error responses**: NXDOMAIN, REFUSED, FORMERR, NOERROR
+
+### Phase 2 (Core Features) - ✅ Complete
+- **TCP server** support for larger responses and zone transfers
+- **Additional record types**: CNAME, MX, TXT
+- **CNAME chain resolution** - automatically chases CNAMEs to final targets
+- **EDNS0 support** - handles larger UDP responses (up to 4096 bytes)
+- **Enhanced response completeness** - proper authority and additional sections
 
 ## Installation
 
@@ -140,15 +148,15 @@ src/
 ├── config.rs     # Configuration structures and parsing
 ├── zone.rs       # Zone data structures and zone file parser
 ├── protocol.rs   # DNS query processing logic
-└── server.rs     # UDP server implementation
+└── server.rs     # UDP and TCP server implementation
 ```
 
 ### Key Components
 
 1. **ZoneStore**: In-memory hash map for fast zone lookups
-2. **QueryProcessor**: Handles DNS query logic and response building
-3. **DnsServer**: Async UDP server using tokio
-4. **Zone Parser**: RFC 1035 zone file parser
+2. **QueryProcessor**: Handles DNS query logic, response building, and CNAME resolution
+3. **DnsServer**: Async UDP and TCP server using tokio
+4. **Zone Parser**: RFC 1035 zone file parser supporting multiple record types
 
 ## Logging
 
@@ -160,34 +168,32 @@ RUST_LOG=lrmdns=debug cargo run -- lrmdns.yaml
 
 ## Performance
 
-Phase 1 focuses on correctness and simplicity. Performance optimizations will come in later phases.
+Phases 1 and 2 focus on correctness and feature completeness. Performance optimizations will come in later phases.
 
 Expected performance:
-- **Latency**: <1ms for local queries
+- **Latency**: <1ms for local queries (UDP), <2ms (TCP)
 - **Throughput**: Thousands of queries per second on modern hardware
-- **Concurrency**: Handles multiple concurrent queries via tokio
+- **Concurrency**: Handles multiple concurrent connections via tokio
+- **Protocol**: UDP for speed, TCP for reliability and larger responses
 
-## Limitations (Phase 1)
+## Current Limitations
 
-- **UDP only** (no TCP support yet)
-- **No EDNS0** support (512 byte limit for responses)
-- **Limited record types** (A, AAAA, NS, SOA only)
-- **No CNAME**, MX, TXT support yet
-- **No zone transfers** (AXFR)
-- **No dynamic updates**
-- **No DNSSEC**
-- **No zone reloading** without restart
+- **No zone transfers** (AXFR) - Planned for Phase 4
+- **No dynamic updates** (RFC 2136)
+- **No DNSSEC** - Planned for Phase 5
+- **No zone reloading** without restart - Planned for Phase 3
+- **No wildcards** (*.example.com) - Planned for Phase 4
+- **No rate limiting** - Planned for Phase 3
+- **Limited record types**: A, AAAA, NS, SOA, CNAME, MX, TXT (more in Phase 4: PTR, SRV, CAA)
 
-These features are planned for future phases (see `plan.md`).
+See `plan.md` for the full implementation roadmap.
 
 ## Roadmap
 
-See `plan.md` for the full implementation roadmap:
-
-- **Phase 1** (MVP): ✅ Complete
-- **Phase 2** (Core): TCP, CNAME, MX, TXT, EDNS0
-- **Phase 3** (Production): Zone reloading, metrics, rate limiting
-- **Phase 4** (Advanced): Wildcards, AXFR, additional record types
+- **Phase 1** (MVP): ✅ Complete - Basic authoritative DNS with UDP
+- **Phase 2** (Core): ✅ Complete - TCP, CNAME, MX, TXT, EDNS0
+- **Phase 3** (Production): Zone reloading, metrics, rate limiting, privilege management
+- **Phase 4** (Advanced): Wildcards, AXFR, PTR/SRV/CAA records, management API
 - **Phase 5** (Future): DNSSEC
 
 ## Contributing

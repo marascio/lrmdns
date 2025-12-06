@@ -3,9 +3,11 @@ use anyhow::{Context, Result};
 use hickory_proto::op::Message;
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use std::sync::Arc;
-use tokio::net::UdpSocket;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 const MAX_DNS_PACKET_SIZE: usize = 512;
+const MAX_TCP_DNS_PACKET_SIZE: usize = 65535;
 
 pub struct DnsServer {
     processor: Arc<QueryProcessor>,
@@ -21,9 +23,19 @@ impl DnsServer {
     }
 
     pub async fn run(&self) -> Result<()> {
+        let udp_future = self.run_udp();
+        let tcp_future = self.run_tcp();
+
+        // Run both servers concurrently
+        tokio::try_join!(udp_future, tcp_future)?;
+
+        Ok(())
+    }
+
+    async fn run_udp(&self) -> Result<()> {
         let socket = UdpSocket::bind(&self.listen_addr)
             .await
-            .context(format!("Failed to bind to {}", self.listen_addr))?;
+            .context(format!("Failed to bind UDP to {}", self.listen_addr))?;
 
         tracing::info!("DNS server listening on {} (UDP)", self.listen_addr);
 
@@ -39,20 +51,46 @@ impl DnsServer {
 
                     // Spawn a task to handle the query
                     tokio::spawn(async move {
-                        if let Err(e) = handle_query(data, addr, processor, socket).await {
-                            tracing::error!("Error handling query from {}: {}", addr, e);
+                        if let Err(e) = handle_udp_query(data, addr, processor, socket).await {
+                            tracing::error!("Error handling UDP query from {}: {}", addr, e);
                         }
                     });
                 }
                 Err(e) => {
-                    tracing::error!("Error receiving packet: {}", e);
+                    tracing::error!("Error receiving UDP packet: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn run_tcp(&self) -> Result<()> {
+        let listener = TcpListener::bind(&self.listen_addr)
+            .await
+            .context(format!("Failed to bind TCP to {}", self.listen_addr))?;
+
+        tracing::info!("DNS server listening on {} (TCP)", self.listen_addr);
+
+        loop {
+            match listener.accept().await {
+                Ok((stream, addr)) => {
+                    let processor = self.processor.clone();
+
+                    // Spawn a task to handle the connection
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_tcp_connection(stream, addr, processor).await {
+                            tracing::error!("Error handling TCP connection from {}: {}", addr, e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("Error accepting TCP connection: {}", e);
                 }
             }
         }
     }
 }
 
-async fn handle_query(
+async fn handle_udp_query(
     data: Vec<u8>,
     addr: std::net::SocketAddr,
     processor: Arc<QueryProcessor>,
@@ -94,11 +132,19 @@ async fn handle_query(
     let response_buf = response.to_bytes()
         .context("Failed to encode DNS response")?;
 
+    // Determine max UDP packet size (EDNS0 or standard)
+    let max_udp_size = if let Some(edns) = response.extensions() {
+        edns.max_payload() as usize
+    } else {
+        MAX_DNS_PACKET_SIZE
+    };
+
     // Check if response fits in UDP packet
-    if response_buf.len() > MAX_DNS_PACKET_SIZE {
+    if response_buf.len() > max_udp_size {
         tracing::warn!(
-            "Response too large ({} bytes), truncating",
-            response_buf.len()
+            "Response too large ({} bytes, max {}), truncating",
+            response_buf.len(),
+            max_udp_size
         );
 
         // Create truncated response
@@ -108,7 +154,7 @@ async fn handle_query(
         while !truncated.answers().is_empty() {
             truncated.take_answers();
             let buf = truncated.to_bytes()?;
-            if buf.len() <= MAX_DNS_PACKET_SIZE {
+            if buf.len() <= max_udp_size {
                 socket.send_to(&buf, addr).await?;
                 return Ok(());
             }
@@ -127,6 +173,95 @@ async fn handle_query(
     );
 
     Ok(())
+}
+
+async fn handle_tcp_connection(
+    mut stream: TcpStream,
+    addr: std::net::SocketAddr,
+    processor: Arc<QueryProcessor>,
+) -> Result<()> {
+    tracing::debug!("TCP connection from {}", addr);
+
+    loop {
+        // Read 2-byte length prefix
+        let mut len_buf = [0u8; 2];
+        match stream.read_exact(&mut len_buf).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // Client closed connection
+                tracing::debug!("TCP connection closed by {}", addr);
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(e).context("Failed to read length prefix");
+            }
+        }
+
+        let msg_len = u16::from_be_bytes(len_buf) as usize;
+
+        if msg_len == 0 || msg_len > MAX_TCP_DNS_PACKET_SIZE {
+            tracing::warn!("Invalid TCP DNS message length from {}: {}", addr, msg_len);
+            return Ok(());
+        }
+
+        // Read the DNS message
+        let mut msg_buf = vec![0u8; msg_len];
+        stream.read_exact(&mut msg_buf).await
+            .context("Failed to read DNS message")?;
+
+        tracing::debug!(
+            "Received TCP query from {}: {} bytes",
+            addr,
+            msg_len
+        );
+
+        // Parse the DNS query
+        let query = match Message::from_bytes(&msg_buf) {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::warn!("Failed to parse TCP DNS query from {}: {}", addr, e);
+
+                // Send FORMERR response
+                let mut response = Message::new();
+                if msg_buf.len() >= 2 {
+                    let id = u16::from_be_bytes([msg_buf[0], msg_buf[1]]);
+                    response.set_id(id);
+                }
+                response.set_message_type(hickory_proto::op::MessageType::Response);
+                response.set_response_code(hickory_proto::op::ResponseCode::FormErr);
+
+                let response_buf = response.to_bytes()
+                    .context("Failed to encode FORMERR response")?;
+
+                // Send with length prefix
+                let len = (response_buf.len() as u16).to_be_bytes();
+                stream.write_all(&len).await?;
+                stream.write_all(&response_buf).await?;
+                return Ok(());
+            }
+        };
+
+        // Process the query
+        let response = processor.process_query(&query)?;
+
+        // Encode the response
+        let response_buf = response.to_bytes()
+            .context("Failed to encode DNS response")?;
+
+        tracing::debug!(
+            "Sending TCP response to {}: id={} rcode={:?} answers={} ({} bytes)",
+            addr,
+            response.id(),
+            response.response_code(),
+            response.answers().len(),
+            response_buf.len()
+        );
+
+        // Send with length prefix
+        let len = (response_buf.len() as u16).to_be_bytes();
+        stream.write_all(&len).await?;
+        stream.write_all(&response_buf).await?;
+    }
 }
 
 #[cfg(test)]

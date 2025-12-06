@@ -44,10 +44,19 @@ impl QueryProcessor {
         let qname = question.name();
         let qtype = question.query_type();
 
+        // Check for EDNS0 support
+        let edns = query.extensions();
+        let client_udp_size = if let Some(edns) = edns {
+            edns.max_payload()
+        } else {
+            512 // Default DNS UDP packet size
+        };
+
         tracing::debug!(
-            "Query: name={} type={:?} from={}",
+            "Query: name={} type={:?} edns_size={} from={}",
             qname,
             qtype,
+            client_udp_size,
             "unknown" // Will be filled in by server
         );
 
@@ -88,13 +97,43 @@ impl QueryProcessor {
                 tracing::debug!("Found {} records for {} {:?}", records.len(), qname, qtype);
             }
             None => {
-                // Name exists but no record of this type
-                response.set_response_code(ResponseCode::NoError);
+                // Check if there's a CNAME record for this name
+                if let Some(cname_records) = zone.lookup(qname, RecordType::CNAME) {
+                    // Add CNAME record(s) to answer
+                    for cname_record in cname_records {
+                        response.add_answer(cname_record.clone());
 
-                // Add SOA in authority section
-                response.add_name_server(zone.get_soa_record());
+                        // Chase the CNAME to find the target records
+                        if let Some(rdata) = cname_record.data() {
+                            if let hickory_proto::rr::RData::CNAME(cname) = rdata {
+                                let target = cname.0.clone();
 
-                tracing::debug!("Name exists but no {:?} record: {}", qtype, qname);
+                                // Try to find the target record of the requested type
+                                if let Some(target_records) = zone.lookup(&target, qtype) {
+                                    for target_record in target_records {
+                                        response.add_answer(target_record.clone());
+                                    }
+                                    tracing::debug!(
+                                        "CNAME {} -> {}, found {} {:?} records",
+                                        qname,
+                                        target,
+                                        target_records.len(),
+                                        qtype
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    response.set_response_code(ResponseCode::NoError);
+                } else {
+                    // Name exists but no record of this type and no CNAME
+                    response.set_response_code(ResponseCode::NoError);
+
+                    // Add SOA in authority section
+                    response.add_name_server(zone.get_soa_record());
+
+                    tracing::debug!("Name exists but no {:?} record: {}", qtype, qname);
+                }
             }
         }
 
@@ -105,6 +144,15 @@ impl QueryProcessor {
                     response.add_name_server(record.clone());
                 }
             }
+        }
+
+        // Add EDNS0 support if client requested it
+        if query.extensions().is_some() {
+            let mut edns = hickory_proto::op::Edns::new();
+            // Advertise our supported UDP payload size (4096 bytes)
+            edns.set_max_payload(4096);
+            edns.set_version(0);
+            response.set_edns(edns);
         }
 
         Ok(response)

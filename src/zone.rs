@@ -255,6 +255,34 @@ fn parse_resource_record(
                 mname, rname, serial, refresh, retry, expire, minimum,
             ))
         }
+        "CNAME" => {
+            if parts.len() <= idx {
+                return Ok(None);
+            }
+            let cname = parse_domain_name(parts[idx], origin)
+                .context(format!("Invalid CNAME record on line {}", line_num + 1))?;
+            RData::CNAME(hickory_proto::rr::rdata::CNAME(cname))
+        }
+        "MX" => {
+            if parts.len() < idx + 2 {
+                return Ok(None);
+            }
+            let preference = parts[idx].parse::<u16>()
+                .context(format!("Invalid MX preference on line {}", line_num + 1))?;
+            let exchange = parse_domain_name(parts[idx + 1], origin)
+                .context(format!("Invalid MX exchange on line {}", line_num + 1))?;
+            RData::MX(hickory_proto::rr::rdata::MX::new(preference, exchange))
+        }
+        "TXT" => {
+            if parts.len() <= idx {
+                return Ok(None);
+            }
+            // Join all remaining parts as the TXT data (handles quoted strings)
+            let txt_data = parts[idx..].join(" ");
+            // Remove quotes if present
+            let txt_data = txt_data.trim_matches('"');
+            RData::TXT(hickory_proto::rr::rdata::TXT::new(vec![txt_data.to_string()]))
+        }
         _ => {
             tracing::warn!("Unsupported record type {} on line {}", rtype, line_num + 1);
             return Ok(None);
