@@ -52,6 +52,28 @@ impl Zone {
         self.records.contains_key(name)
     }
 
+    /// Lookup a wildcard record by finding the best matching wildcard
+    /// Returns None if no wildcard matches
+    pub fn lookup_wildcard(&self, name: &Name, rtype: RecordType) -> Option<&Vec<Record>> {
+        // Try to find a wildcard match by constructing potential wildcard names
+        // For "foo.bar.example.com", try "*.bar.example.com", then "*.example.com"
+        let labels = name.iter().collect::<Vec<_>>();
+
+        // Start from the second label (skip the leftmost label)
+        for skip in 1..labels.len() {
+            let mut wildcard_labels = vec![b"*".as_ref()];
+            wildcard_labels.extend_from_slice(&labels[skip..]);
+
+            if let Ok(wildcard_name) = Name::from_labels(wildcard_labels) {
+                if let Some(records) = self.lookup(&wildcard_name, rtype) {
+                    return Some(records);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn get_soa_record(&self) -> Record {
         let rdata = RData::SOA(hickory_proto::rr::rdata::SOA::new(
             self.soa.mname.clone(),
@@ -183,6 +205,19 @@ fn parse_resource_record(
     // Parse name
     let name = if parts[idx] == "@" {
         origin.clone()
+    } else if parts[idx] == "*" {
+        // Wildcard at zone apex: *.example.com.
+        Name::from_str(&format!("*.{}", origin))
+            .context(format!("Invalid wildcard name on line {}", line_num + 1))?
+    } else if parts[idx].starts_with("*.") {
+        // Wildcard with subdomain: *.sub.example.com
+        if parts[idx].ends_with('.') {
+            Name::from_str(parts[idx])
+                .context(format!("Invalid wildcard name on line {}", line_num + 1))?
+        } else {
+            Name::from_str(&format!("{}.{}", parts[idx], origin))
+                .context(format!("Invalid wildcard name on line {}", line_num + 1))?
+        }
     } else if parts[idx].ends_with('.') {
         Name::from_str(parts[idx])
             .context(format!("Invalid name on line {}", line_num + 1))?
@@ -343,5 +378,60 @@ mod tests {
 
         let query = Name::from_str("example.org.").unwrap();
         assert!(store.find_zone(&query).is_none());
+    }
+
+    #[test]
+    fn test_wildcard_lookup() {
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 1,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let mut zone = Zone::new(origin.clone(), soa);
+
+        // Add a wildcard A record
+        let wildcard_name = Name::from_str("*.example.com.").unwrap();
+        let wildcard_record = Record::from_rdata(
+            wildcard_name.clone(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 100))),
+        );
+        zone.add_record(wildcard_record);
+
+        // Add a specific record that should override wildcard
+        let www_name = Name::from_str("www.example.com.").unwrap();
+        let www_record = Record::from_rdata(
+            www_name.clone(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 10))),
+        );
+        zone.add_record(www_record);
+
+        // Test direct wildcard lookup
+        let wildcard_result = zone.lookup(&wildcard_name, RecordType::A);
+        assert!(wildcard_result.is_some());
+        assert_eq!(wildcard_result.unwrap().len(), 1);
+
+        // Test wildcard match for non-existent name
+        let random_name = Name::from_str("random.example.com.").unwrap();
+        let wildcard_match = zone.lookup_wildcard(&random_name, RecordType::A);
+        assert!(wildcard_match.is_some());
+        assert_eq!(wildcard_match.unwrap().len(), 1);
+
+        // Test that specific record exists (should NOT use wildcard)
+        let www_result = zone.lookup(&www_name, RecordType::A);
+        assert!(www_result.is_some());
+        assert_eq!(www_result.unwrap().len(), 1);
+
+        // Verify www returns different IP than wildcard
+        if let Some(RData::A(a)) = www_result.unwrap()[0].data() {
+            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10));
+        }
     }
 }
