@@ -91,6 +91,29 @@ impl Zone {
             rdata,
         )
     }
+
+    /// Get all records in the zone for AXFR
+    /// Returns records in canonical order: SOA, other records, SOA
+    pub fn get_all_records(&self) -> Vec<Record> {
+        let mut records = Vec::new();
+
+        // Start with SOA
+        records.push(self.get_soa_record());
+
+        // Add all other records
+        for record_map in self.records.values() {
+            for record_vec in record_map.values() {
+                for record in record_vec {
+                    records.push(record.clone());
+                }
+            }
+        }
+
+        // End with SOA
+        records.push(self.get_soa_record());
+
+        records
+    }
 }
 
 #[derive(Debug)]

@@ -90,10 +90,11 @@ impl DnsServer {
                     let processor = self.processor.clone();
                     let metrics = self.metrics.clone();
                     let rate_limiter = self.rate_limiter.clone();
+                    let zones = processor.get_zones();
 
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
-                        if let Err(e) = handle_tcp_connection(stream, addr, processor, metrics, rate_limiter).await {
+                        if let Err(e) = handle_tcp_connection(stream, addr, processor, metrics, rate_limiter, zones).await {
                             tracing::error!("Error handling TCP connection from {}: {}", addr, e);
                         }
                     });
@@ -253,6 +254,7 @@ async fn handle_tcp_connection(
     processor: Arc<QueryProcessor>,
     metrics: Arc<Metrics>,
     rate_limiter: Option<Arc<RateLimiter>>,
+    zones: Arc<tokio::sync::RwLock<crate::zone::ZoneStore>>,
 ) -> Result<()> {
     use crate::metrics::Protocol;
     use std::time::Instant;
@@ -359,7 +361,69 @@ async fn handle_tcp_connection(
             metrics.record_query_type(question.query_type());
         }
 
-        // Process the query
+        // Check if this is an AXFR query
+        let is_axfr = query.queries().first()
+            .map(|q| q.query_type() == hickory_proto::rr::RecordType::AXFR)
+            .unwrap_or(false);
+
+        if is_axfr {
+            // Handle AXFR zone transfer
+            tracing::info!("AXFR request from {} for {:?}", addr, query.queries().first().map(|q| q.name()));
+
+            // Get the zone
+            let zone_store = zones.read().await;
+            if let Some(question) = query.queries().first() {
+                if let Some(zone) = zone_store.find_zone(question.name()) {
+                    // Get all records in the zone
+                    let all_records = zone.get_all_records();
+
+                    tracing::debug!("AXFR: Streaming {} records to {}", all_records.len(), addr);
+
+                    // Stream each record as a separate DNS message
+                    for record in all_records {
+                        let mut axfr_msg = Message::new();
+                        axfr_msg.set_id(query.id());
+                        axfr_msg.set_message_type(hickory_proto::op::MessageType::Response);
+                        axfr_msg.set_op_code(hickory_proto::op::OpCode::Query);
+                        axfr_msg.set_authoritative(true);
+                        axfr_msg.add_query(question.clone());
+                        axfr_msg.add_answer(record);
+
+                        let msg_buf = axfr_msg.to_bytes()
+                            .context("Failed to encode AXFR message")?;
+
+                        let len = (msg_buf.len() as u16).to_be_bytes();
+                        stream.write_all(&len).await?;
+                        stream.write_all(&msg_buf).await?;
+                    }
+
+                    metrics.record_response(hickory_proto::op::ResponseCode::NoError);
+                    metrics.record_latency(start.elapsed());
+                    tracing::info!("AXFR completed for {}", addr);
+                    return Ok(());
+                } else {
+                    // Not authoritative for this zone
+                    tracing::warn!("AXFR refused for non-authoritative zone from {}", addr);
+                    let mut refused_response = Message::new();
+                    refused_response.set_id(query.id());
+                    refused_response.set_message_type(hickory_proto::op::MessageType::Response);
+                    refused_response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+                    refused_response.add_query(question.clone());
+
+                    let response_buf = refused_response.to_bytes()
+                        .context("Failed to encode refused response")?;
+                    let len = (response_buf.len() as u16).to_be_bytes();
+                    stream.write_all(&len).await?;
+                    stream.write_all(&response_buf).await?;
+
+                    metrics.record_response(hickory_proto::op::ResponseCode::Refused);
+                    metrics.record_latency(start.elapsed());
+                    return Ok(());
+                }
+            }
+        }
+
+        // Process the query (normal, non-AXFR)
         let response = match processor.process_query(&query).await {
             Ok(resp) => resp,
             Err(e) => {

@@ -14,6 +14,10 @@ impl QueryProcessor {
         QueryProcessor { zones }
     }
 
+    pub fn get_zones(&self) -> Arc<RwLock<ZoneStore>> {
+        self.zones.clone()
+    }
+
     pub async fn process_query(&self, query: &Message) -> Result<Message> {
         let mut response = Message::new();
 
@@ -28,6 +32,19 @@ impl QueryProcessor {
         if query.op_code() != OpCode::Query {
             response.set_response_code(ResponseCode::NotImp);
             return Ok(response);
+        }
+
+        // Check for AXFR query (zone transfer)
+        // AXFR must be handled specially by the TCP server
+        if let Some(question) = query.queries().first() {
+            if question.query_type() == RecordType::AXFR {
+                // AXFR queries must be over TCP
+                // We'll return the response with a special marker
+                // The TCP handler will detect this and stream the zone
+                response.add_query(question.clone());
+                response.set_authoritative(true);
+                return Ok(response);
+            }
         }
 
         // Get the first question
