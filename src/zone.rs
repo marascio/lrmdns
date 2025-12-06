@@ -426,6 +426,112 @@ fn parse_resource_record(
                 )
             ))
         }
+        "RRSIG" => {
+            // RRSIG: type_covered algorithm labels original_ttl sig_expiration sig_inception key_tag signer_name signature
+            if parts.len() < idx + 9 {
+                return Ok(None);
+            }
+
+            let type_covered = RecordType::from_str(parts[idx])
+                .context(format!("Invalid RRSIG type_covered on line {}", line_num + 1))?;
+            let algorithm = parts[idx + 1].parse::<u8>()
+                .context(format!("Invalid RRSIG algorithm on line {}", line_num + 1))?;
+            let labels = parts[idx + 2].parse::<u8>()
+                .context(format!("Invalid RRSIG labels on line {}", line_num + 1))?;
+            let original_ttl = parts[idx + 3].parse::<u32>()
+                .context(format!("Invalid RRSIG original_ttl on line {}", line_num + 1))?;
+            let sig_expiration = parts[idx + 4].parse::<u32>()
+                .context(format!("Invalid RRSIG sig_expiration on line {}", line_num + 1))?;
+            let sig_inception = parts[idx + 5].parse::<u32>()
+                .context(format!("Invalid RRSIG sig_inception on line {}", line_num + 1))?;
+            let key_tag = parts[idx + 6].parse::<u16>()
+                .context(format!("Invalid RRSIG key_tag on line {}", line_num + 1))?;
+            let signer_name = parse_domain_name(parts[idx + 7], origin)
+                .context(format!("Invalid RRSIG signer_name on line {}", line_num + 1))?;
+
+            // Signature is base64 encoded, join remaining parts
+            let signature_b64 = parts[idx + 8..].join("");
+            let signature = match base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &signature_b64
+            ) {
+                Ok(sig) => sig,
+                Err(_) => {
+                    tracing::warn!("Invalid base64 in RRSIG on line {}", line_num + 1);
+                    return Ok(None);
+                }
+            };
+
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(
+                hickory_proto::rr::dnssec::rdata::SIG::new(
+                    type_covered,
+                    hickory_proto::rr::dnssec::Algorithm::from_u8(algorithm),
+                    labels,
+                    original_ttl,
+                    sig_expiration,
+                    sig_inception,
+                    key_tag,
+                    signer_name,
+                    signature,
+                )
+            ))
+        }
+        "NSEC" => {
+            // NSEC: next_domain_name type_bit_maps
+            if parts.len() < idx + 2 {
+                return Ok(None);
+            }
+
+            let next_domain_name = parse_domain_name(parts[idx], origin)
+                .context(format!("Invalid NSEC next_domain_name on line {}", line_num + 1))?;
+
+            // Parse type bit maps - simplified version, just parse the record types
+            let mut type_bit_maps = Vec::new();
+            for part in &parts[idx + 1..] {
+                if let Ok(rtype) = RecordType::from_str(part) {
+                    type_bit_maps.push(rtype);
+                }
+            }
+
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(
+                hickory_proto::rr::dnssec::rdata::NSEC::new(
+                    next_domain_name,
+                    type_bit_maps,
+                )
+            ))
+        }
+        "DS" => {
+            // DS: key_tag algorithm digest_type digest
+            if parts.len() < idx + 4 {
+                return Ok(None);
+            }
+
+            let key_tag = parts[idx].parse::<u16>()
+                .context(format!("Invalid DS key_tag on line {}", line_num + 1))?;
+            let algorithm = parts[idx + 1].parse::<u8>()
+                .context(format!("Invalid DS algorithm on line {}", line_num + 1))?;
+            let digest_type = parts[idx + 2].parse::<u8>()
+                .context(format!("Invalid DS digest_type on line {}", line_num + 1))?;
+
+            // Digest is hex encoded
+            let digest_hex = parts[idx + 3..].join("");
+            let digest = match hex::decode(&digest_hex) {
+                Ok(d) => d,
+                Err(_) => {
+                    tracing::warn!("Invalid hex in DS on line {}", line_num + 1);
+                    return Ok(None);
+                }
+            };
+
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(
+                hickory_proto::rr::dnssec::rdata::DS::new(
+                    key_tag,
+                    hickory_proto::rr::dnssec::Algorithm::from_u8(algorithm),
+                    hickory_proto::rr::dnssec::DigestType::from_u8(digest_type)?,
+                    digest,
+                )
+            ))
+        }
         _ => {
             tracing::warn!("Unsupported record type {} on line {}", rtype, line_num + 1);
             return Ok(None);
@@ -568,6 +674,94 @@ mod tests {
 
         // Verify it's actually a DNSSEC record
         if let Some(rdata) = dnskey_records.unwrap()[0].data() {
+            assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
+        }
+    }
+
+    #[test]
+    fn test_rrsig_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary zone file with RRSIG record
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
+        // RRSIG: type_covered algorithm labels original_ttl sig_expiration sig_inception key_tag signer_name signature
+        // sig_expiration and sig_inception are Unix timestamps (u32)
+        writeln!(temp_file, "@ IN RRSIG A 8 2 3600 1767139200 1764547200 12345 example.com. AwEAAaetidLzsKWU").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Verify RRSIG was parsed (stored as SIG in hickory-proto)
+        let rrsig_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::SIG);
+        assert!(rrsig_records.is_some(), "RRSIG record should be parsed");
+        assert_eq!(rrsig_records.unwrap().len(), 1, "Should have one RRSIG record");
+
+        // Verify it's actually a DNSSEC record
+        if let Some(rdata) = rrsig_records.unwrap()[0].data() {
+            assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
+        }
+    }
+
+    #[test]
+    fn test_nsec_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary zone file with NSEC record
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
+        // NSEC: next_domain_name type_bit_maps...
+        writeln!(temp_file, "@ IN NSEC www.example.com. A NS SOA RRSIG NSEC DNSKEY").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Verify NSEC was parsed
+        let nsec_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::NSEC);
+        assert!(nsec_records.is_some(), "NSEC record should be parsed");
+        assert_eq!(nsec_records.unwrap().len(), 1, "Should have one NSEC record");
+
+        // Verify it's actually a DNSSEC record
+        if let Some(rdata) = nsec_records.unwrap()[0].data() {
+            assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
+        }
+    }
+
+    #[test]
+    fn test_ds_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary zone file with DS record
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
+        // DS: key_tag algorithm digest_type digest_hex
+        writeln!(temp_file, "@ IN DS 12345 8 2 A8B1C2D3E4F506172839405A6B7C8D9E0F1A2B3C4D5E6F70").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Verify DS was parsed
+        let ds_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DS);
+        assert!(ds_records.is_some(), "DS record should be parsed");
+        assert_eq!(ds_records.unwrap().len(), 1, "Should have one DS record");
+
+        // Verify it's actually a DNSSEC record
+        if let Some(rdata) = ds_records.unwrap()[0].data() {
             assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
         }
     }
