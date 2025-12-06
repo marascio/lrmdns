@@ -318,6 +318,57 @@ fn parse_resource_record(
             let txt_data = txt_data.trim_matches('"');
             RData::TXT(hickory_proto::rr::rdata::TXT::new(vec![txt_data.to_string()]))
         }
+        "PTR" => {
+            if parts.len() <= idx {
+                return Ok(None);
+            }
+            let ptrdname = parse_domain_name(parts[idx], origin)
+                .context(format!("Invalid PTR record on line {}", line_num + 1))?;
+            RData::PTR(hickory_proto::rr::rdata::PTR(ptrdname))
+        }
+        "SRV" => {
+            if parts.len() < idx + 4 {
+                return Ok(None);
+            }
+            let priority = parts[idx].parse::<u16>()
+                .context(format!("Invalid SRV priority on line {}", line_num + 1))?;
+            let weight = parts[idx + 1].parse::<u16>()
+                .context(format!("Invalid SRV weight on line {}", line_num + 1))?;
+            let port = parts[idx + 2].parse::<u16>()
+                .context(format!("Invalid SRV port on line {}", line_num + 1))?;
+            let target = parse_domain_name(parts[idx + 3], origin)
+                .context(format!("Invalid SRV target on line {}", line_num + 1))?;
+            RData::SRV(hickory_proto::rr::rdata::SRV::new(priority, weight, port, target))
+        }
+        "CAA" => {
+            if parts.len() < idx + 3 {
+                return Ok(None);
+            }
+            let flags = parts[idx].parse::<u8>()
+                .context(format!("Invalid CAA flags on line {}", line_num + 1))?;
+            let tag = parts[idx + 1].to_string();
+            // Join remaining parts and remove quotes
+            let value = parts[idx + 2..].join(" ");
+            let value = value.trim_matches('"');
+
+            // Create CAA record - for now, only support "issue" tag properly
+            let caa = if tag == "issue" || tag == "issuewild" {
+                if value.is_empty() || value == ";" {
+                    hickory_proto::rr::rdata::CAA::new_issue(flags & 0x80 != 0, None, vec![])
+                } else {
+                    hickory_proto::rr::rdata::CAA::new_issue(
+                        flags & 0x80 != 0,
+                        Some(hickory_proto::rr::Name::from_str(value)
+                            .unwrap_or_else(|_| hickory_proto::rr::Name::root())),
+                        vec![],
+                    )
+                }
+            } else {
+                // For other tags, use a simple issue record
+                hickory_proto::rr::rdata::CAA::new_issue(flags & 0x80 != 0, None, vec![])
+            };
+            RData::CAA(caa)
+        }
         _ => {
             tracing::warn!("Unsupported record type {} on line {}", rtype, line_num + 1);
             return Ok(None);
