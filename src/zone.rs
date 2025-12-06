@@ -392,6 +392,40 @@ fn parse_resource_record(
             };
             RData::CAA(caa)
         }
+        "DNSKEY" => {
+            if parts.len() < idx + 4 {
+                return Ok(None);
+            }
+            let flags = parts[idx].parse::<u16>()
+                .context(format!("Invalid DNSKEY flags on line {}", line_num + 1))?;
+            let _protocol = parts[idx + 1].parse::<u8>()
+                .context(format!("Invalid DNSKEY protocol on line {}", line_num + 1))?;
+            let algorithm = parts[idx + 2].parse::<u8>()
+                .context(format!("Invalid DNSKEY algorithm on line {}", line_num + 1))?;
+
+            // Public key is base64 encoded, join remaining parts
+            let public_key_b64 = parts[idx + 3..].join("");
+            let public_key = match base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &public_key_b64
+            ) {
+                Ok(key) => key,
+                Err(_) => {
+                    tracing::warn!("Invalid base64 in DNSKEY on line {}", line_num + 1);
+                    return Ok(None);
+                }
+            };
+
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                hickory_proto::rr::dnssec::rdata::DNSKEY::new(
+                    flags & 0x0100 != 0, // zone key flag
+                    flags & 0x0001 != 0, // secure entry point flag
+                    flags & 0x8000 != 0, // revoke flag
+                    hickory_proto::rr::dnssec::Algorithm::from_u8(algorithm),
+                    public_key,
+                )
+            ))
+        }
         _ => {
             tracing::warn!("Unsupported record type {} on line {}", rtype, line_num + 1);
             return Ok(None);
@@ -506,6 +540,35 @@ mod tests {
         // Verify www returns different IP than wildcard
         if let Some(RData::A(a)) = www_result.unwrap()[0].data() {
             assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10));
+        }
+    }
+
+    #[test]
+    fn test_dnskey_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary zone file with DNSKEY record
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
+        // DNSKEY with simple base64 key for testing
+        writeln!(temp_file, "@ IN DNSKEY 256 3 8 AwEAAaetidLzsKWUt4swWR8yu0wPHPiUi8LU").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Verify DNSKEY was parsed
+        let dnskey_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
+        assert!(dnskey_records.is_some(), "DNSKEY record should be parsed");
+        assert_eq!(dnskey_records.unwrap().len(), 1, "Should have one DNSKEY record");
+
+        // Verify it's actually a DNSSEC record
+        if let Some(rdata) = dnskey_records.unwrap()[0].data() {
+            assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
         }
     }
 }

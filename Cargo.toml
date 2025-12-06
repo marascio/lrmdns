@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-hickory-proto = "0.24"
+hickory-proto = { version = "0.24", features = ["dnssec"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
@@ -14,3 +14,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 axum = "0.7"
 tower = "0.5"
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"
