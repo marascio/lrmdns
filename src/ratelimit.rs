@@ -46,12 +46,9 @@ impl RateLimiter {
         let window = inner.window;
         let max_qps = inner.max_qps;
 
-        let client = inner
-            .clients
-            .entry(addr)
-            .or_insert_with(|| ClientState {
-                queries: Vec::new(),
-            });
+        let client = inner.clients.entry(addr).or_insert_with(|| ClientState {
+            queries: Vec::new(),
+        });
 
         // Remove queries outside the time window
         client
@@ -78,15 +75,17 @@ impl RateLimiter {
 impl RateLimiterInner {
     fn cleanup(&mut self) {
         let now = Instant::now();
-        self.clients
-            .retain(|_, client| {
-                client
-                    .queries
-                    .retain(|&timestamp| now.duration_since(timestamp) < self.window);
-                !client.queries.is_empty()
-            });
+        self.clients.retain(|_, client| {
+            client
+                .queries
+                .retain(|&timestamp| now.duration_since(timestamp) < self.window);
+            !client.queries.is_empty()
+        });
 
-        tracing::debug!("Rate limiter cleanup: {} clients tracked", self.clients.len());
+        tracing::debug!(
+            "Rate limiter cleanup: {} clients tracked",
+            self.clients.len()
+        );
     }
 }
 

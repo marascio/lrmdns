@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use hickory_proto::rr::dnssec::DigestType;
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use sha2::{Digest, Sha256, Sha512};
@@ -94,7 +94,7 @@ pub fn verify_ds(ds: &Record, dnskey: &Record) -> Result<()> {
             return Err(anyhow!(
                 "Unsupported digest type: {:?}",
                 ds_data.digest_type()
-            ))
+            ));
         }
     };
 
@@ -179,10 +179,7 @@ pub fn validate_nsec_denial(
 
         // Check if NSEC proves the type doesn't exist at this name
         if query_name == owner_name {
-            let type_exists = nsec_data
-                .type_bit_maps()
-                .iter()
-                .any(|&t| t == query_type);
+            let type_exists = nsec_data.type_bit_maps().iter().any(|&t| t == query_type);
 
             if !type_exists {
                 // Type doesn't exist at this name
@@ -432,11 +429,11 @@ mod tests {
         let sig = SIG::new(
             RecordType::A,
             Algorithm::RSASHA256,
-            2,                 // labels
-            300,               // original_ttl
-            past_time + 3600,  // expiration (23 hours ago)
-            past_time,         // inception (1 day ago)
-            12345,             // key_tag
+            2,                // labels
+            300,              // original_ttl
+            past_time + 3600, // expiration (23 hours ago)
+            past_time,        // inception (1 day ago)
+            12345,            // key_tag
             Name::from_str("example.com.").unwrap(),
             vec![1, 2, 3, 4, 5], // signature
         );
@@ -463,11 +460,11 @@ mod tests {
         let sig = SIG::new(
             RecordType::A,
             Algorithm::RSASHA256,
-            2,              // labels
-            300,            // original_ttl
-            now + 3600,     // expiration (1 hour from now)
-            now - 3600,     // inception (1 hour ago)
-            12345,          // key_tag
+            2,          // labels
+            300,        // original_ttl
+            now + 3600, // expiration (1 hour from now)
+            now - 3600, // inception (1 hour ago)
+            12345,      // key_tag
             Name::from_str("example.com.").unwrap(),
             vec![1, 2, 3, 4, 5], // signature
         );
@@ -526,6 +523,11 @@ mod tests {
 
         let result = verify_ds(&ds_record, &dnskey_record);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Algorithm mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Algorithm mismatch")
+        );
     }
 }

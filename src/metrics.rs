@@ -1,8 +1,8 @@
 use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::RecordType;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -124,11 +124,7 @@ impl Metrics {
         let total = self.total_queries.load(Ordering::Relaxed);
         let total_latency = self.total_latency_us.load(Ordering::Relaxed);
 
-        let avg_latency_us = if total > 0 {
-            total_latency / total
-        } else {
-            0
-        };
+        let avg_latency_us = if total > 0 { total_latency / total } else { 0 };
 
         let min_latency = self.min_latency_us.load(Ordering::Relaxed);
         let min_latency_us = if min_latency == u64::MAX {

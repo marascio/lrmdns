@@ -85,11 +85,7 @@ impl Zone {
             self.soa.minimum,
         ));
 
-        Record::from_rdata(
-            self.origin.clone(),
-            self.soa.minimum,
-            rdata,
-        )
+        Record::from_rdata(self.origin.clone(), self.soa.minimum, rdata)
     }
 
     /// Get all records in the zone for AXFR
@@ -158,11 +154,9 @@ impl ZoneStore {
 }
 
 pub fn parse_zone_file<P: AsRef<Path>>(path: P, origin_name: &str) -> Result<Zone> {
-    let content = std::fs::read_to_string(path.as_ref())
-        .context("Failed to read zone file")?;
+    let content = std::fs::read_to_string(path.as_ref()).context("Failed to read zone file")?;
 
-    let origin = Name::from_str(origin_name)
-        .context("Invalid origin name")?;
+    let origin = Name::from_str(origin_name).context("Invalid origin name")?;
 
     let mut zone: Option<Zone> = None;
     let mut default_ttl: u32 = 3600;
@@ -187,7 +181,8 @@ pub fn parse_zone_file<P: AsRef<Path>>(path: P, origin_name: &str) -> Result<Zon
             } else if line.starts_with("$TTL") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    default_ttl = parts[1].parse()
+                    default_ttl = parts[1]
+                        .parse()
                         .context(format!("Invalid $TTL on line {}", line_num + 1))?;
                 }
             }
@@ -242,8 +237,7 @@ fn parse_resource_record(
                 .context(format!("Invalid wildcard name on line {}", line_num + 1))?
         }
     } else if parts[idx].ends_with('.') {
-        Name::from_str(parts[idx])
-            .context(format!("Invalid name on line {}", line_num + 1))?
+        Name::from_str(parts[idx]).context(format!("Invalid name on line {}", line_num + 1))?
     } else {
         Name::from_str(&format!("{}.{}", parts[idx], origin))
             .context(format!("Invalid name on line {}", line_num + 1))?
@@ -272,7 +266,8 @@ fn parse_resource_record(
             if parts.len() <= idx {
                 return Ok(None);
             }
-            let addr = parts[idx].parse::<Ipv4Addr>()
+            let addr = parts[idx]
+                .parse::<Ipv4Addr>()
                 .context(format!("Invalid A record on line {}", line_num + 1))?;
             RData::A(hickory_proto::rr::rdata::A(addr))
         }
@@ -280,7 +275,8 @@ fn parse_resource_record(
             if parts.len() <= idx {
                 return Ok(None);
             }
-            let addr = parts[idx].parse::<Ipv6Addr>()
+            let addr = parts[idx]
+                .parse::<Ipv6Addr>()
                 .context(format!("Invalid AAAA record on line {}", line_num + 1))?;
             RData::AAAA(hickory_proto::rr::rdata::AAAA(addr))
         }
@@ -298,15 +294,20 @@ fn parse_resource_record(
             }
             let mname = parse_domain_name(parts[idx], origin)?;
             let rname = parse_domain_name(parts[idx + 1], origin)?;
-            let serial = parts[idx + 2].parse()
+            let serial = parts[idx + 2]
+                .parse()
                 .context(format!("Invalid SOA serial on line {}", line_num + 1))?;
-            let refresh = parts[idx + 3].parse()
+            let refresh = parts[idx + 3]
+                .parse()
                 .context(format!("Invalid SOA refresh on line {}", line_num + 1))?;
-            let retry = parts[idx + 4].parse()
+            let retry = parts[idx + 4]
+                .parse()
                 .context(format!("Invalid SOA retry on line {}", line_num + 1))?;
-            let expire = parts[idx + 5].parse()
+            let expire = parts[idx + 5]
+                .parse()
                 .context(format!("Invalid SOA expire on line {}", line_num + 1))?;
-            let minimum = parts[idx + 6].parse()
+            let minimum = parts[idx + 6]
+                .parse()
                 .context(format!("Invalid SOA minimum on line {}", line_num + 1))?;
 
             RData::SOA(hickory_proto::rr::rdata::SOA::new(
@@ -325,7 +326,8 @@ fn parse_resource_record(
             if parts.len() < idx + 2 {
                 return Ok(None);
             }
-            let preference = parts[idx].parse::<u16>()
+            let preference = parts[idx]
+                .parse::<u16>()
                 .context(format!("Invalid MX preference on line {}", line_num + 1))?;
             let exchange = parse_domain_name(parts[idx + 1], origin)
                 .context(format!("Invalid MX exchange on line {}", line_num + 1))?;
@@ -339,7 +341,9 @@ fn parse_resource_record(
             let txt_data = parts[idx..].join(" ");
             // Remove quotes if present
             let txt_data = txt_data.trim_matches('"');
-            RData::TXT(hickory_proto::rr::rdata::TXT::new(vec![txt_data.to_string()]))
+            RData::TXT(hickory_proto::rr::rdata::TXT::new(vec![
+                txt_data.to_string(),
+            ]))
         }
         "PTR" => {
             if parts.len() <= idx {
@@ -353,21 +357,27 @@ fn parse_resource_record(
             if parts.len() < idx + 4 {
                 return Ok(None);
             }
-            let priority = parts[idx].parse::<u16>()
+            let priority = parts[idx]
+                .parse::<u16>()
                 .context(format!("Invalid SRV priority on line {}", line_num + 1))?;
-            let weight = parts[idx + 1].parse::<u16>()
+            let weight = parts[idx + 1]
+                .parse::<u16>()
                 .context(format!("Invalid SRV weight on line {}", line_num + 1))?;
-            let port = parts[idx + 2].parse::<u16>()
+            let port = parts[idx + 2]
+                .parse::<u16>()
                 .context(format!("Invalid SRV port on line {}", line_num + 1))?;
             let target = parse_domain_name(parts[idx + 3], origin)
                 .context(format!("Invalid SRV target on line {}", line_num + 1))?;
-            RData::SRV(hickory_proto::rr::rdata::SRV::new(priority, weight, port, target))
+            RData::SRV(hickory_proto::rr::rdata::SRV::new(
+                priority, weight, port, target,
+            ))
         }
         "CAA" => {
             if parts.len() < idx + 3 {
                 return Ok(None);
             }
-            let flags = parts[idx].parse::<u8>()
+            let flags = parts[idx]
+                .parse::<u8>()
                 .context(format!("Invalid CAA flags on line {}", line_num + 1))?;
             let tag = parts[idx + 1].to_string();
             // Join remaining parts and remove quotes
@@ -381,8 +391,10 @@ fn parse_resource_record(
                 } else {
                     hickory_proto::rr::rdata::CAA::new_issue(
                         flags & 0x80 != 0,
-                        Some(hickory_proto::rr::Name::from_str(value)
-                            .unwrap_or_else(|_| hickory_proto::rr::Name::root())),
+                        Some(
+                            hickory_proto::rr::Name::from_str(value)
+                                .unwrap_or_else(|_| hickory_proto::rr::Name::root()),
+                        ),
                         vec![],
                     )
                 }
@@ -396,18 +408,21 @@ fn parse_resource_record(
             if parts.len() < idx + 4 {
                 return Ok(None);
             }
-            let flags = parts[idx].parse::<u16>()
+            let flags = parts[idx]
+                .parse::<u16>()
                 .context(format!("Invalid DNSKEY flags on line {}", line_num + 1))?;
-            let _protocol = parts[idx + 1].parse::<u8>()
+            let _protocol = parts[idx + 1]
+                .parse::<u8>()
                 .context(format!("Invalid DNSKEY protocol on line {}", line_num + 1))?;
-            let algorithm = parts[idx + 2].parse::<u8>()
+            let algorithm = parts[idx + 2]
+                .parse::<u8>()
                 .context(format!("Invalid DNSKEY algorithm on line {}", line_num + 1))?;
 
             // Public key is base64 encoded, join remaining parts
             let public_key_b64 = parts[idx + 3..].join("");
             let public_key = match base64::Engine::decode(
                 &base64::engine::general_purpose::STANDARD,
-                &public_key_b64
+                &public_key_b64,
             ) {
                 Ok(key) => key,
                 Err(_) => {
@@ -423,7 +438,7 @@ fn parse_resource_record(
                     flags & 0x8000 != 0, // revoke flag
                     hickory_proto::rr::dnssec::Algorithm::from_u8(algorithm),
                     public_key,
-                )
+                ),
             ))
         }
         "RRSIG" => {
@@ -432,28 +447,41 @@ fn parse_resource_record(
                 return Ok(None);
             }
 
-            let type_covered = RecordType::from_str(parts[idx])
-                .context(format!("Invalid RRSIG type_covered on line {}", line_num + 1))?;
-            let algorithm = parts[idx + 1].parse::<u8>()
+            let type_covered = RecordType::from_str(parts[idx]).context(format!(
+                "Invalid RRSIG type_covered on line {}",
+                line_num + 1
+            ))?;
+            let algorithm = parts[idx + 1]
+                .parse::<u8>()
                 .context(format!("Invalid RRSIG algorithm on line {}", line_num + 1))?;
-            let labels = parts[idx + 2].parse::<u8>()
+            let labels = parts[idx + 2]
+                .parse::<u8>()
                 .context(format!("Invalid RRSIG labels on line {}", line_num + 1))?;
-            let original_ttl = parts[idx + 3].parse::<u32>()
-                .context(format!("Invalid RRSIG original_ttl on line {}", line_num + 1))?;
-            let sig_expiration = parts[idx + 4].parse::<u32>()
-                .context(format!("Invalid RRSIG sig_expiration on line {}", line_num + 1))?;
-            let sig_inception = parts[idx + 5].parse::<u32>()
-                .context(format!("Invalid RRSIG sig_inception on line {}", line_num + 1))?;
-            let key_tag = parts[idx + 6].parse::<u16>()
+            let original_ttl = parts[idx + 3].parse::<u32>().context(format!(
+                "Invalid RRSIG original_ttl on line {}",
+                line_num + 1
+            ))?;
+            let sig_expiration = parts[idx + 4].parse::<u32>().context(format!(
+                "Invalid RRSIG sig_expiration on line {}",
+                line_num + 1
+            ))?;
+            let sig_inception = parts[idx + 5].parse::<u32>().context(format!(
+                "Invalid RRSIG sig_inception on line {}",
+                line_num + 1
+            ))?;
+            let key_tag = parts[idx + 6]
+                .parse::<u16>()
                 .context(format!("Invalid RRSIG key_tag on line {}", line_num + 1))?;
-            let signer_name = parse_domain_name(parts[idx + 7], origin)
-                .context(format!("Invalid RRSIG signer_name on line {}", line_num + 1))?;
+            let signer_name = parse_domain_name(parts[idx + 7], origin).context(format!(
+                "Invalid RRSIG signer_name on line {}",
+                line_num + 1
+            ))?;
 
             // Signature is base64 encoded, join remaining parts
             let signature_b64 = parts[idx + 8..].join("");
             let signature = match base64::Engine::decode(
                 &base64::engine::general_purpose::STANDARD,
-                &signature_b64
+                &signature_b64,
             ) {
                 Ok(sig) => sig,
                 Err(_) => {
@@ -473,7 +501,7 @@ fn parse_resource_record(
                     key_tag,
                     signer_name,
                     signature,
-                )
+                ),
             ))
         }
         "NSEC" => {
@@ -482,8 +510,10 @@ fn parse_resource_record(
                 return Ok(None);
             }
 
-            let next_domain_name = parse_domain_name(parts[idx], origin)
-                .context(format!("Invalid NSEC next_domain_name on line {}", line_num + 1))?;
+            let next_domain_name = parse_domain_name(parts[idx], origin).context(format!(
+                "Invalid NSEC next_domain_name on line {}",
+                line_num + 1
+            ))?;
 
             // Parse type bit maps - simplified version, just parse the record types
             let mut type_bit_maps = Vec::new();
@@ -494,10 +524,7 @@ fn parse_resource_record(
             }
 
             RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(
-                hickory_proto::rr::dnssec::rdata::NSEC::new(
-                    next_domain_name,
-                    type_bit_maps,
-                )
+                hickory_proto::rr::dnssec::rdata::NSEC::new(next_domain_name, type_bit_maps),
             ))
         }
         "DS" => {
@@ -506,11 +533,14 @@ fn parse_resource_record(
                 return Ok(None);
             }
 
-            let key_tag = parts[idx].parse::<u16>()
+            let key_tag = parts[idx]
+                .parse::<u16>()
                 .context(format!("Invalid DS key_tag on line {}", line_num + 1))?;
-            let algorithm = parts[idx + 1].parse::<u8>()
+            let algorithm = parts[idx + 1]
+                .parse::<u8>()
                 .context(format!("Invalid DS algorithm on line {}", line_num + 1))?;
-            let digest_type = parts[idx + 2].parse::<u8>()
+            let digest_type = parts[idx + 2]
+                .parse::<u8>()
                 .context(format!("Invalid DS digest_type on line {}", line_num + 1))?;
 
             // Digest is hex encoded
@@ -529,7 +559,7 @@ fn parse_resource_record(
                     hickory_proto::rr::dnssec::Algorithm::from_u8(algorithm),
                     hickory_proto::rr::dnssec::DigestType::from_u8(digest_type)?,
                     digest,
-                )
+                ),
             ))
         }
         _ => {
@@ -658,19 +688,32 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
         writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
         // DNSKEY with simple base64 key for testing
-        writeln!(temp_file, "@ IN DNSKEY 256 3 8 AwEAAaetidLzsKWUt4swWR8yu0wPHPiUi8LU").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN DNSKEY 256 3 8 AwEAAaetidLzsKWUt4swWR8yu0wPHPiUi8LU"
+        )
+        .unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
 
         // Verify DNSKEY was parsed
-        let dnskey_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
+        let dnskey_records =
+            zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
         assert!(dnskey_records.is_some(), "DNSKEY record should be parsed");
-        assert_eq!(dnskey_records.unwrap().len(), 1, "Should have one DNSKEY record");
+        assert_eq!(
+            dnskey_records.unwrap().len(),
+            1,
+            "Should have one DNSKEY record"
+        );
 
         // Verify it's actually a DNSSEC record
         if let Some(rdata) = dnskey_records.unwrap()[0].data() {
@@ -687,12 +730,20 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
         writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
         // RRSIG: type_covered algorithm labels original_ttl sig_expiration sig_inception key_tag signer_name signature
         // sig_expiration and sig_inception are Unix timestamps (u32)
-        writeln!(temp_file, "@ IN RRSIG A 8 2 3600 1767139200 1764547200 12345 example.com. AwEAAaetidLzsKWU").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN RRSIG A 8 2 3600 1767139200 1764547200 12345 example.com. AwEAAaetidLzsKWU"
+        )
+        .unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
@@ -700,7 +751,11 @@ mod tests {
         // Verify RRSIG was parsed (stored as SIG in hickory-proto)
         let rrsig_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::SIG);
         assert!(rrsig_records.is_some(), "RRSIG record should be parsed");
-        assert_eq!(rrsig_records.unwrap().len(), 1, "Should have one RRSIG record");
+        assert_eq!(
+            rrsig_records.unwrap().len(),
+            1,
+            "Should have one RRSIG record"
+        );
 
         // Verify it's actually a DNSSEC record
         if let Some(rdata) = rrsig_records.unwrap()[0].data() {
@@ -717,11 +772,19 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
         writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
         // NSEC: next_domain_name type_bit_maps...
-        writeln!(temp_file, "@ IN NSEC www.example.com. A NS SOA RRSIG NSEC DNSKEY").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN NSEC www.example.com. A NS SOA RRSIG NSEC DNSKEY"
+        )
+        .unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
@@ -729,7 +792,11 @@ mod tests {
         // Verify NSEC was parsed
         let nsec_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::NSEC);
         assert!(nsec_records.is_some(), "NSEC record should be parsed");
-        assert_eq!(nsec_records.unwrap().len(), 1, "Should have one NSEC record");
+        assert_eq!(
+            nsec_records.unwrap().len(),
+            1,
+            "Should have one NSEC record"
+        );
 
         // Verify it's actually a DNSSEC record
         if let Some(rdata) = nsec_records.unwrap()[0].data() {
@@ -746,11 +813,19 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
         writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
         // DS: key_tag algorithm digest_type digest_hex
-        writeln!(temp_file, "@ IN DS 12345 8 2 A8B1C2D3E4F506172839405A6B7C8D9E0F1A2B3C4D5E6F70").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN DS 12345 8 2 A8B1C2D3E4F506172839405A6B7C8D9E0F1A2B3C4D5E6F70"
+        )
+        .unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
@@ -790,7 +865,11 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL invalid").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         temp_file.flush().unwrap();
 
         let result = parse_zone_file(temp_file.path(), "example.com.");
@@ -805,7 +884,11 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN A invalid.ip.address").unwrap();
         temp_file.flush().unwrap();
 
@@ -847,14 +930,19 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         // Invalid base64 in DNSKEY
         writeln!(temp_file, "@ IN DNSKEY 256 3 8 !!!INVALID_BASE64!!!").unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
         // Invalid DNSKEY should be skipped
-        let dnskey_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
+        let dnskey_records =
+            zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
         assert!(dnskey_records.is_none(), "Invalid DNSKEY should be skipped");
     }
 
@@ -866,7 +954,11 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         // Invalid hex in DS digest
         writeln!(temp_file, "@ IN DS 12345 8 2 ZZZZZZ").unwrap();
         temp_file.flush().unwrap();
@@ -885,7 +977,11 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         // Very long label (>63 characters, which violates DNS spec)
         let long_label = "a".repeat(70);
         writeln!(temp_file, "{} IN A 192.0.2.1", long_label).unwrap();
@@ -933,7 +1029,11 @@ mod tests {
         let specific_result = zone.lookup(&specific_name, RecordType::A);
         assert!(specific_result.is_some());
         if let Some(RData::A(a)) = specific_result.unwrap()[0].data() {
-            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10), "Specific record should override wildcard");
+            assert_eq!(
+                a.0,
+                Ipv4Addr::new(192, 0, 2, 10),
+                "Specific record should override wildcard"
+            );
         }
 
         // Test wildcard match
@@ -962,7 +1062,10 @@ mod tests {
 
         // Query for record type that doesn't exist
         let result = zone.lookup(&origin, RecordType::MX);
-        assert!(result.is_none(), "Should return None for non-existent record type");
+        assert!(
+            result.is_none(),
+            "Should return None for non-existent record type"
+        );
     }
 
     #[test]
@@ -973,7 +1076,11 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "@ IN CAA 0 issue \"letsencrypt.org\"").unwrap();
         writeln!(temp_file, "@ IN CAA 0 issuewild \"letsencrypt.org\"").unwrap();
         writeln!(temp_file, "@ IN CAA 0 iodef \"mailto:admin@example.com\"").unwrap();
@@ -993,14 +1100,18 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN 2.0.192.in-addr.arpa.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "1 IN PTR www.example.com.").unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "2.0.192.in-addr.arpa.").unwrap();
         let ptr_records = zone.lookup(
             &Name::from_str("1.2.0.192.in-addr.arpa.").unwrap(),
-            RecordType::PTR
+            RecordType::PTR,
         );
         assert!(ptr_records.is_some());
     }
@@ -1013,14 +1124,18 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "$ORIGIN example.com.").unwrap();
         writeln!(temp_file, "$TTL 3600").unwrap();
-        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
         writeln!(temp_file, "_http._tcp IN SRV 10 60 80 www.example.com.").unwrap();
         temp_file.flush().unwrap();
 
         let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
         let srv_records = zone.lookup(
             &Name::from_str("_http._tcp.example.com.").unwrap(),
-            RecordType::SRV
+            RecordType::SRV,
         );
         assert!(srv_records.is_some());
     }

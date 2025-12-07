@@ -30,8 +30,10 @@ async fn main() -> Result<()> {
     };
 
     // Load configuration
-    let config = Config::from_file(&config_path)
-        .context(format!("Failed to load config from {}", config_path.display()))?;
+    let config = Config::from_file(&config_path).context(format!(
+        "Failed to load config from {}",
+        config_path.display()
+    ))?;
 
     // Initialize logging
     let log_level = config.server.log_level.clone();
@@ -47,7 +49,8 @@ async fn main() -> Result<()> {
     tracing::info!("Configuration loaded from: {}", config_path.display());
 
     // Validate configuration
-    config.validate()
+    config
+        .validate()
         .context("Configuration validation failed")?;
 
     // Load all zones
@@ -57,7 +60,10 @@ async fn main() -> Result<()> {
     let metrics = Arc::new(Metrics::new());
 
     // Create rate limiter if configured
-    let rate_limiter = config.server.rate_limit.map(|limit| Arc::new(RateLimiter::new(limit)));
+    let rate_limiter = config
+        .server
+        .rate_limit
+        .map(|limit| Arc::new(RateLimiter::new(limit)));
 
     // Create query processor
     let processor = QueryProcessor::new(zone_store.clone());
@@ -107,38 +113,38 @@ async fn main() -> Result<()> {
 fn load_zones(config: &Config) -> Result<ZoneStore> {
     let mut zone_store = ZoneStore::new();
     for zone_config in &config.zones {
-        tracing::info!("Loading zone: {} from {}", zone_config.name, zone_config.file.display());
+        tracing::info!(
+            "Loading zone: {} from {}",
+            zone_config.name,
+            zone_config.file.display()
+        );
 
         let zone = zone::parse_zone_file(&zone_config.file, &zone_config.name)
             .context(format!("Failed to load zone {}", zone_config.name))?;
 
-        let record_count: usize = zone.records.values()
+        let record_count: usize = zone
+            .records
+            .values()
             .map(|type_map| type_map.values().map(|v| v.len()).sum::<usize>())
             .sum();
 
-        tracing::info!(
-            "Zone {} loaded: {} records",
-            zone_config.name,
-            record_count
-        );
+        tracing::info!("Zone {} loaded: {} records", zone_config.name, record_count);
 
         zone_store.add_zone(zone);
     }
     Ok(zone_store)
 }
 
-async fn handle_signals(
-    config: Config,
-    zone_store: Arc<RwLock<ZoneStore>>,
-    metrics: Arc<Metrics>,
-) {
+async fn handle_signals(config: Config, zone_store: Arc<RwLock<ZoneStore>>, metrics: Arc<Metrics>) {
     loop {
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
 
-            let mut sighup = signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
-            let mut sigusr1 = signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
+            let mut sighup =
+                signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
+            let mut sigusr1 =
+                signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
 
             tokio::select! {
                 _ = sighup.recv() => {

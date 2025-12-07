@@ -1,9 +1,9 @@
 use crate::metrics::Metrics;
 use axum::{
+    Router,
     extract::State,
     response::{IntoResponse, Json},
     routing::get,
-    Router,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -33,7 +33,8 @@ async fn get_metrics(State(state): State<ApiState>) -> impl IntoResponse {
     let snapshot = state.metrics.get_snapshot();
 
     // Convert query_types HashMap to a JSON-friendly format
-    let query_types: std::collections::HashMap<String, u64> = snapshot.query_types
+    let query_types: std::collections::HashMap<String, u64> = snapshot
+        .query_types
         .iter()
         .map(|(k, v)| (format!("{:?}", k), *v))
         .collect();
@@ -72,7 +73,10 @@ async fn get_metrics(State(state): State<ApiState>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use tower::util::ServiceExt;
 
     #[tokio::test]
@@ -81,7 +85,12 @@ mod tests {
         let app = create_router(metrics);
 
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -94,7 +103,12 @@ mod tests {
         let app = create_router(metrics);
 
         let response = app
-            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 

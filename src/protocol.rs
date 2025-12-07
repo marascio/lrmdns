@@ -117,7 +117,10 @@ impl QueryProcessor {
                     if let Some(rrsigs) = zone.lookup(qname, RecordType::SIG) {
                         for rrsig in rrsigs {
                             // Check if this RRSIG covers the queried record type
-                            if let Some(hickory_proto::rr::RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig))) = rrsig.data() {
+                            if let Some(hickory_proto::rr::RData::DNSSEC(
+                                hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig),
+                            )) = rrsig.data()
+                            {
                                 if sig.type_covered() == qtype {
                                     response.add_answer(rrsig.clone());
                                 }
@@ -430,7 +433,10 @@ mod tests {
 
         // Verify DNSSEC OK flag is set in response
         if let Some(response_edns) = response.extensions() {
-            assert!(response_edns.dnssec_ok(), "DNSSEC OK flag should be set in response");
+            assert!(
+                response_edns.dnssec_ok(),
+                "DNSSEC OK flag should be set in response"
+            );
         }
     }
 
@@ -561,7 +567,7 @@ mod tests {
             Name::from_str("alias.example.com.").unwrap(),
             3600,
             RData::CNAME(hickory_proto::rr::rdata::CNAME(
-                Name::from_str("nonexistent.example.com.").unwrap()
+                Name::from_str("nonexistent.example.com.").unwrap(),
             )),
         );
         zone.add_record(cname_record);
@@ -583,7 +589,10 @@ mod tests {
         assert_eq!(response.response_code(), ResponseCode::NoError);
         // Should have CNAME in answer but no A record
         assert_eq!(response.answers().len(), 1);
-        assert!(matches!(response.answers()[0].data(), Some(RData::CNAME(_))));
+        assert!(matches!(
+            response.answers()[0].data(),
+            Some(RData::CNAME(_))
+        ));
     }
 
     #[tokio::test]
