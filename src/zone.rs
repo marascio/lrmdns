@@ -162,7 +162,10 @@ pub fn parse_zone_file<P: AsRef<Path>>(path: P, origin_name: &str) -> Result<Zon
     let mut default_ttl: u32 = 3600;
     let mut current_origin = origin.clone();
 
-    for (line_num, line) in content.lines().enumerate() {
+    // Preprocess the content to handle multi-line records with parentheses
+    let processed_lines = preprocess_zone_content(&content);
+
+    for (line_num, line) in processed_lines.iter().enumerate() {
         let line = line.trim();
 
         // Skip empty lines and comments
@@ -206,6 +209,71 @@ pub fn parse_zone_file<P: AsRef<Path>>(path: P, origin_name: &str) -> Result<Zon
     }
 
     zone.ok_or_else(|| anyhow::anyhow!("Zone file must contain an SOA record"))
+}
+
+/// Preprocesses zone file content to handle multi-line records with parentheses
+/// and strip inline comments
+fn preprocess_zone_content(content: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current_line = String::new();
+    let mut in_parens = false;
+
+    for line in content.lines() {
+        // Strip inline comments (but preserve the rest of the line)
+        let line_without_comment = if let Some(pos) = line.find(';') {
+            // Check if the semicolon is inside quotes (for TXT records, etc.)
+            let before_semicolon = &line[..pos];
+            let quote_count = before_semicolon.matches('"').count();
+
+            // If odd number of quotes, semicolon is inside a string, keep it
+            if quote_count % 2 == 1 {
+                line
+            } else {
+                before_semicolon
+            }
+        } else {
+            line
+        };
+
+        let trimmed = line_without_comment.trim();
+
+        // Check for opening parenthesis
+        if trimmed.contains('(') {
+            in_parens = true;
+            // Add everything before and including the paren to current line
+            current_line.push_str(trimmed.replace('(', "").trim());
+            current_line.push(' ');
+            continue;
+        }
+
+        // Check for closing parenthesis
+        if trimmed.contains(')') {
+            in_parens = false;
+            // Add everything before the closing paren and finalize the line
+            current_line.push_str(trimmed.replace(')', "").trim());
+            result.push(current_line.trim().to_string());
+            current_line = String::new();
+            continue;
+        }
+
+        // If we're inside parentheses, accumulate
+        if in_parens {
+            current_line.push_str(trimmed);
+            current_line.push(' ');
+        } else {
+            // Normal line - add it directly (unless it's empty)
+            if !trimmed.is_empty() {
+                result.push(trimmed.to_string());
+            }
+        }
+    }
+
+    // Handle case where parentheses weren't closed (add remaining content)
+    if !current_line.is_empty() {
+        result.push(current_line.trim().to_string());
+    }
+
+    result
 }
 
 fn parse_resource_record(
@@ -1139,5 +1207,383 @@ mod tests {
             RecordType::SRV,
         );
         assert!(srv_records.is_some());
+    }
+
+    #[test]
+    fn test_multiline_soa_with_parentheses() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    2024010101  ; Serial").unwrap();
+        writeln!(temp_file, "    7200        ; Refresh").unwrap();
+        writeln!(temp_file, "    3600        ; Retry").unwrap();
+        writeln!(temp_file, "    1209600     ; Expire").unwrap();
+        writeln!(temp_file, "    86400       ; Minimum TTL").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Verify SOA was parsed correctly
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+        assert_eq!(zone.soa.retry, 3600);
+        assert_eq!(zone.soa.expire, 1209600);
+        assert_eq!(zone.soa.minimum, 86400);
+
+        // Verify NS record was also parsed
+        let ns_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::NS);
+        assert!(ns_records.is_some());
+    }
+
+    #[test]
+    fn test_multiline_soa_without_inline_comments() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    2024010101").unwrap();
+        writeln!(temp_file, "    7200").unwrap();
+        writeln!(temp_file, "    3600").unwrap();
+        writeln!(temp_file, "    1209600").unwrap();
+        writeln!(temp_file, "    86400").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+    }
+
+    #[test]
+    fn test_inline_comments_stripped() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600 ; default TTL").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400 ; SOA record"
+        )
+        .unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com. ; nameserver").unwrap();
+        writeln!(temp_file, "ns1 IN A 192.0.2.1 ; nameserver IP").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+
+        // Should parse successfully despite comments
+        let ns_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::NS);
+        assert!(ns_records.is_some());
+    }
+
+    #[test]
+    fn test_preprocess_zone_content() {
+        let content = r#"$ORIGIN example.com.
+$TTL 3600
+@ IN SOA ns1.example.com. admin.example.com. (
+    2024010101  ; Serial
+    7200        ; Refresh
+    3600        ; Retry
+    1209600     ; Expire
+    86400       ; Minimum TTL
+)
+@ IN NS ns1.example.com.
+"#;
+
+        let processed = preprocess_zone_content(content);
+
+        // Should have 4 lines: $ORIGIN, $TTL, SOA (merged), NS
+        assert_eq!(processed.len(), 4);
+
+        // SOA line should be merged
+        assert!(processed[2].contains("SOA"));
+        assert!(processed[2].contains("2024010101"));
+        assert!(processed[2].contains("86400"));
+
+        // Comments should be stripped
+        assert!(!processed[2].contains(";"));
+    }
+
+    #[test]
+    fn test_soa_single_line_format() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 2024010101 7200 3600 1209600 86400"
+        )
+        .unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+        assert_eq!(zone.soa.retry, 3600);
+        assert_eq!(zone.soa.expire, 1209600);
+        assert_eq!(zone.soa.minimum, 86400);
+    }
+
+    #[test]
+    fn test_soa_multiline_compact() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // All values on one line within parentheses
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    2024010101 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+    }
+
+    #[test]
+    fn test_soa_multiline_each_field_separate_line() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Each field on its own line
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    2024010101").unwrap();
+        writeln!(temp_file, "    7200").unwrap();
+        writeln!(temp_file, "    3600").unwrap();
+        writeln!(temp_file, "    1209600").unwrap();
+        writeln!(temp_file, "    86400").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.minimum, 86400);
+    }
+
+    #[test]
+    fn test_soa_multiline_mixed_grouping() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Some fields grouped, some separate
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    2024010101 7200").unwrap();
+        writeln!(temp_file, "    3600").unwrap();
+        writeln!(temp_file, "    1209600 86400").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+        assert_eq!(zone.soa.retry, 3600);
+        assert_eq!(zone.soa.expire, 1209600);
+        assert_eq!(zone.soa.minimum, 86400);
+    }
+
+    #[test]
+    fn test_soa_with_inline_comments() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. ( ; Start SOA"
+        )
+        .unwrap();
+        writeln!(temp_file, "    2024010101  ; Serial number").unwrap();
+        writeln!(temp_file, "    7200        ; Refresh - 2 hours").unwrap();
+        writeln!(temp_file, "    3600        ; Retry - 1 hour").unwrap();
+        writeln!(temp_file, "    1209600     ; Expire - 2 weeks").unwrap();
+        writeln!(temp_file, "    86400       ; Minimum TTL - 1 day").unwrap();
+        writeln!(temp_file, ") ; End SOA").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com. ; Primary NS").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+        assert_eq!(zone.soa.retry, 3600);
+        assert_eq!(zone.soa.expire, 1209600);
+        assert_eq!(zone.soa.minimum, 86400);
+    }
+
+    #[test]
+    fn test_soa_single_line_with_comment() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 2024010101 7200 3600 1209600 86400 ; Main SOA"
+        )
+        .unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+    }
+
+    #[test]
+    fn test_soa_with_tabs_and_spaces() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@\tIN\tSOA\tns1.example.com.\tadmin.example.com.\t("
+        )
+        .unwrap();
+        writeln!(temp_file, "\t\t2024010101\t\t; Serial").unwrap();
+        writeln!(temp_file, "        7200          ; Refresh").unwrap();
+        writeln!(temp_file, "\t3600\t\t; Retry").unwrap();
+        writeln!(temp_file, "    1209600    ; Expire").unwrap();
+        writeln!(temp_file, "\t86400\t; Minimum").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+        assert_eq!(zone.soa.retry, 3600);
+    }
+
+    #[test]
+    fn test_soa_opening_paren_on_same_line_as_name() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Opening paren on same line as mname and rname
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. ( 2024010101"
+        )
+        .unwrap();
+        writeln!(temp_file, "    7200 3600").unwrap();
+        writeln!(temp_file, "    1209600 86400 )").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.minimum, 86400);
+    }
+
+    #[test]
+    fn test_soa_multiple_blank_lines_in_parens() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file).unwrap();
+        writeln!(temp_file, "    2024010101").unwrap();
+        writeln!(temp_file).unwrap();
+        writeln!(temp_file, "    7200 3600").unwrap();
+        writeln!(temp_file).unwrap();
+        writeln!(temp_file, "    1209600 86400").unwrap();
+        writeln!(temp_file).unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+    }
+
+    #[test]
+    fn test_soa_comment_only_lines_in_parens() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. (").unwrap();
+        writeln!(temp_file, "    ; This is the serial number").unwrap();
+        writeln!(temp_file, "    2024010101").unwrap();
+        writeln!(temp_file, "    ; Time values below").unwrap();
+        writeln!(temp_file, "    7200").unwrap();
+        writeln!(temp_file, "    3600").unwrap();
+        writeln!(temp_file, "    1209600").unwrap();
+        writeln!(temp_file, "    86400").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        assert_eq!(zone.soa.serial, 2024010101);
+        assert_eq!(zone.soa.refresh, 7200);
+    }
+
+    #[test]
+    fn test_multiline_mx_record() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Test that multiline format works for other record types too
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
+        writeln!(temp_file, "@ IN MX (").unwrap();
+        writeln!(temp_file, "    10").unwrap();
+        writeln!(temp_file, "    mail.example.com.").unwrap();
+        writeln!(temp_file, ")").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let mx_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::MX);
+        assert!(mx_records.is_some());
+        assert_eq!(mx_records.unwrap().len(), 1);
     }
 }

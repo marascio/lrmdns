@@ -1,0 +1,15 @@
+$ORIGIN test3.example.
+$TTL 1800
+
+; Multi-line SOA without comments (compact multi-line)
+@ IN SOA ns1.test3.example. root.test3.example. (
+    2024120603
+    14400
+    7200
+    2419200
+    172800
+)
+
+@ IN NS ns1.test3.example.
+
+ns1 IN A 192.0.2.71

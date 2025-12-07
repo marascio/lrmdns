@@ -1,0 +1,13 @@
+$ORIGIN test.example.
+$TTL 7200
+
+; Single-line SOA format (traditional compact style)
+@ IN SOA ns1.test.example. hostmaster.test.example. 2024120601 10800 3600 604800 86400
+
+@ IN NS ns1.test.example.
+@ IN NS ns2.test.example.
+
+ns1 IN A 192.0.2.53
+ns2 IN A 192.0.2.54
+
+www IN A 192.0.2.100
