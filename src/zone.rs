@@ -38,9 +38,9 @@ impl Zone {
 
         self.records
             .entry(name)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .entry(rtype)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(record);
     }
 
@@ -64,10 +64,10 @@ impl Zone {
             let mut wildcard_labels = vec![b"*".as_ref()];
             wildcard_labels.extend_from_slice(&labels[skip..]);
 
-            if let Ok(wildcard_name) = Name::from_labels(wildcard_labels) {
-                if let Some(records) = self.lookup(&wildcard_name, rtype) {
-                    return Some(records);
-                }
+            if let Ok(wildcard_name) = Name::from_labels(wildcard_labels)
+                && let Some(records) = self.lookup(&wildcard_name, rtype)
+            {
+                return Some(records);
             }
         }
 
@@ -192,10 +192,11 @@ pub fn parse_zone_file<P: AsRef<Path>>(path: P, origin_name: &str) -> Result<Zon
         // Parse resource record
         if let Some(record) = parse_resource_record(line, &current_origin, default_ttl, line_num)? {
             // If this is SOA and we don't have a zone yet, create it
-            if record.record_type() == RecordType::SOA && zone.is_none() {
-                if let Some(soa_data) = extract_soa_data(&record) {
-                    zone = Some(Zone::new(origin.clone(), soa_data));
-                }
+            if record.record_type() == RecordType::SOA
+                && zone.is_none()
+                && let Some(soa_data) = extract_soa_data(&record)
+            {
+                zone = Some(Zone::new(origin.clone(), soa_data));
             }
 
             if let Some(ref mut z) = zone {
