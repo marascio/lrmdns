@@ -42,7 +42,7 @@ wait_for_server() {
     local attempt=0
 
     while [ $attempt -lt $max_attempts ]; do
-        if dig @127.0.0.1 -p "$port" version.bind chaos txt +short >/dev/null 2>&1; then
+        if nc -z 127.0.0.1 "$port" 2>/dev/null; then
             return 0
         fi
         sleep 0.1
