@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# External test suite orchestration for lrmdns integration tests
+
+# Setup Deckard test suite
+setup_deckard() {
+    local deckard_dir="fixtures/external/deckard"
+
+    if [ ! -d "$deckard_dir" ]; then
+        git clone https://github.com/CZ-NIC/deckard.git "$deckard_dir"
+    fi
+
+    # Configure Deckard to use lrmdns
+    cat > "$deckard_dir/lrmdns.conf" <<EOF
+[resolver]
+binary = ${LRMDNS_BIN}
+config = $(pwd)/fixtures/configs/deckard.yaml
+EOF
+}
+
+# Run Deckard tests
+run_deckard() {
+    local deckard_dir="fixtures/external/deckard"
+    local test_pattern="${1:-*.rpl}"
+
+    cd "$deckard_dir"
+    python3 deckard.py --config lrmdns.conf "$test_pattern"
+    cd - >/dev/null
+}
+
+# Setup FerretDataset
+setup_ferret() {
+    local ferret_dir="fixtures/external/ferret"
+
+    if [ ! -d "$ferret_dir" ]; then
+        git clone https://github.com/dns-groot/FerretDataset.git "$ferret_dir"
+    fi
+}
+
+# Run FerretDataset tests
+run_ferret() {
+    local ferret_dir="fixtures/external/ferret"
+    local category="${1:-all}"
+
+    # FerretDataset format: query file, expected response
+    # Parse and run against lrmdns
+    python3 scripts/run-ferret.py "$ferret_dir" "$category" "$LRMDNS_PORT"
+}
+
+# Check if external suite is available
+has_deckard() {
+    [ -d "fixtures/external/deckard" ]
+}
+
+has_ferret() {
+    [ -d "fixtures/external/ferret" ]
+}

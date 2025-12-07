@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Custom assertions for lrmdns integration tests
+
+# Assert DNS response contains IP
+assert_response_ip() {
+    local response="$1"
+    local expected_ip="$2"
+
+    if ! echo "$response" | grep -q "$expected_ip"; then
+        echo "Expected IP $expected_ip not found in response: $response" >&2
+        return 1
+    fi
+}
+
+# Assert response code
+assert_rcode() {
+    local domain="$1"
+    local expected_rcode="$2"
+    local port="${3:-$LRMDNS_PORT}"
+
+    local actual_rcode=$(get_rcode "$domain" A "$port")
+
+    if [ "$actual_rcode" != "$expected_rcode" ]; then
+        echo "Expected RCODE $expected_rcode, got $actual_rcode" >&2
+        return 1
+    fi
+}
+
+# Assert answer count
+assert_answer_count() {
+    local domain="$1"
+    local expected_count="$2"
+    local type="${3:-A}"
+    local port="${4:-$LRMDNS_PORT}"
+
+    local count=$(get_answer_count "$domain" "$type" "$port")
+
+    if [ "$count" -ne "$expected_count" ]; then
+        echo "Expected $expected_count answers, got $count" >&2
+        return 1
+    fi
+}
+
+# Assert metric value
+assert_metric() {
+    local metric_name="$1"
+    local expected_value="$2"
+    local api_port="${3:-8080}"
+
+    if ! command -v jq &>/dev/null; then
+        skip "jq not available"
+    fi
+
+    local actual_value=$(get_metrics "$api_port" | jq -r ".$metric_name")
+
+    if [ "$actual_value" != "$expected_value" ]; then
+        echo "Metric $metric_name: expected $expected_value, got $actual_value" >&2
+        return 1
+    fi
+}

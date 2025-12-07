@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Server lifecycle management for lrmdns integration tests
+
+# Start lrmdns server
+# Args: $1 = config file, $2 = port (optional)
+start_server() {
+    local config="${1:-fixtures/configs/basic.yaml}"
+    local port="${2:-15353}"
+
+    # Kill any existing instance
+    stop_server || true
+
+    # Start server in background
+    LRMDNS_BIN="${LRMDNS_BIN:-../target/release/lrmdns}"
+    $LRMDNS_BIN "$config" > /tmp/lrmdns-test.log 2>&1 &
+    LRMDNS_PID=$!
+
+    # Wait for server to start
+    wait_for_server "$port"
+
+    export LRMDNS_PID
+    export LRMDNS_PORT="$port"
+}
+
+# Stop lrmdns server
+stop_server() {
+    if [ -n "$LRMDNS_PID" ]; then
+        kill "$LRMDNS_PID" 2>/dev/null || true
+        wait "$LRMDNS_PID" 2>/dev/null || true
+        unset LRMDNS_PID
+    fi
+
+    # Cleanup any orphaned processes
+    pkill -f "lrmdns" || true
+}
+
+# Wait for server to be ready
+# Args: $1 = port
+wait_for_server() {
+    local port="$1"
+    local max_attempts=30
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if dig @127.0.0.1 -p "$port" version.bind chaos txt +short >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+
+    echo "Server failed to start on port $port" >&2
+    return 1
+}
+
+# Reload server zones (SIGHUP)
+reload_server() {
+    if [ -n "$LRMDNS_PID" ]; then
+        kill -HUP "$LRMDNS_PID"
+        sleep 0.5  # Give server time to reload
+    fi
+}
+
+# Get server metrics (SIGUSR1)
+dump_metrics() {
+    if [ -n "$LRMDNS_PID" ]; then
+        kill -USR1 "$LRMDNS_PID"
+        sleep 0.1
+    fi
+}
+
+# Query metrics API
+# Args: $1 = API port (default 8080)
+get_metrics() {
+    local api_port="${1:-8080}"
+    curl -s "http://127.0.0.1:${api_port}/metrics"
+}
+
+# Cleanup on exit
+cleanup_server() {
+    stop_server
+    rm -f /tmp/lrmdns-test.log
+}

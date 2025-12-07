@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# DNS query helpers for lrmdns integration tests
+
+# Query A record using dig
+# Args: $1 = domain, $2 = server port
+query_a() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" A +short
+}
+
+# Query AAAA record
+query_aaaa() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" AAAA +short
+}
+
+# Query MX record
+query_mx() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" MX +short
+}
+
+# Query TXT record
+query_txt() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" TXT +short
+}
+
+# Query NS record
+query_ns() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" NS +short
+}
+
+# Query with DNSSEC (DO flag)
+query_dnssec() {
+    local domain="$1"
+    local type="${2:-A}"
+    local port="${3:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" "$type" +dnssec +noall +answer
+}
+
+# Query over TCP
+query_tcp() {
+    local domain="$1"
+    local type="${2:-A}"
+    local port="${3:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" "$type" +tcp +short
+}
+
+# AXFR zone transfer
+query_axfr() {
+    local zone="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$zone" AXFR
+}
+
+# Get query response code
+# Args: $1 = domain, $2 = type, $3 = port
+get_rcode() {
+    local domain="$1"
+    local type="${2:-A}"
+    local port="${3:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" "$type" +noall +comments | \
+        grep -oE 'status: [A-Z]+' | cut -d' ' -f2
+}
+
+# Check if response has AA (authoritative) flag
+is_authoritative() {
+    local domain="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" A +noall +comments | \
+        grep -q 'flags:.*aa'
+}
+
+# Query with EDNS
+query_edns() {
+    local domain="$1"
+    local bufsize="${2:-4096}"
+    local port="${3:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" A +bufsize="$bufsize" +short
+}
+
+# Get answer count from query
+get_answer_count() {
+    local domain="$1"
+    local type="${2:-A}"
+    local port="${3:-$LRMDNS_PORT}"
+    dig @127.0.0.1 -p "$port" "$domain" "$type" +short | wc -l | tr -d ' '
+}
