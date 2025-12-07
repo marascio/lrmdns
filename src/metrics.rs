@@ -264,4 +264,165 @@ mod tests {
         assert_eq!(snapshot.nxdomain_responses, 1);
         assert_eq!(snapshot.avg_latency_us, 750);
     }
+
+    #[test]
+    fn test_all_response_codes() {
+        let metrics = Metrics::new();
+
+        // Test all response codes
+        metrics.record_response(ResponseCode::NoError);
+        metrics.record_response(ResponseCode::NXDomain);
+        metrics.record_response(ResponseCode::ServFail);
+        metrics.record_response(ResponseCode::Refused);
+        metrics.record_response(ResponseCode::FormErr);
+
+        let snapshot = metrics.get_snapshot();
+
+        assert_eq!(snapshot.noerror_responses, 1);
+        assert_eq!(snapshot.nxdomain_responses, 1);
+        assert_eq!(snapshot.servfail_responses, 1);
+        assert_eq!(snapshot.refused_responses, 1);
+        assert_eq!(snapshot.formerr_responses, 1);
+    }
+
+    #[test]
+    fn test_rate_limited_and_errors() {
+        let metrics = Metrics::new();
+
+        metrics.record_rate_limited();
+        metrics.record_rate_limited();
+        metrics.record_error();
+        metrics.record_error();
+        metrics.record_error();
+
+        let snapshot = metrics.get_snapshot();
+
+        assert_eq!(snapshot.rate_limited, 2);
+        assert_eq!(snapshot.errors, 3);
+    }
+
+    #[test]
+    fn test_latency_min_max() {
+        let metrics = Metrics::new();
+
+        // Need to record queries for latency to be meaningful
+        metrics.record_query(Protocol::Udp, false);
+        metrics.record_query(Protocol::Udp, false);
+        metrics.record_query(Protocol::Udp, false);
+        metrics.record_query(Protocol::Udp, false);
+        metrics.record_query(Protocol::Udp, false);
+
+        // Record various latencies
+        metrics.record_latency(Duration::from_micros(100));
+        metrics.record_latency(Duration::from_micros(500));
+        metrics.record_latency(Duration::from_micros(50));
+        metrics.record_latency(Duration::from_micros(1000));
+        metrics.record_latency(Duration::from_micros(200));
+
+        let snapshot = metrics.get_snapshot();
+
+        assert_eq!(snapshot.min_latency_us, 50);
+        assert_eq!(snapshot.max_latency_us, 1000);
+        assert_eq!(snapshot.avg_latency_us, (100 + 500 + 50 + 1000 + 200) / 5);
+    }
+
+    #[test]
+    fn test_multiple_query_types() {
+        let metrics = Metrics::new();
+
+        metrics.record_query_type(RecordType::A);
+        metrics.record_query_type(RecordType::AAAA);
+        metrics.record_query_type(RecordType::A);
+        metrics.record_query_type(RecordType::MX);
+        metrics.record_query_type(RecordType::A);
+        metrics.record_query_type(RecordType::AAAA);
+
+        let snapshot = metrics.get_snapshot();
+
+        assert_eq!(snapshot.query_types.get(&RecordType::A), Some(&3));
+        assert_eq!(snapshot.query_types.get(&RecordType::AAAA), Some(&2));
+        assert_eq!(snapshot.query_types.get(&RecordType::MX), Some(&1));
+    }
+
+    #[test]
+    fn test_zero_queries_latency() {
+        let metrics = Metrics::new();
+
+        // No queries recorded
+        let snapshot = metrics.get_snapshot();
+
+        // Average should be 0 when no queries
+        assert_eq!(snapshot.avg_latency_us, 0);
+        assert_eq!(snapshot.total_queries, 0);
+    }
+
+    #[test]
+    fn test_uptime() {
+        let metrics = Metrics::new();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let snapshot = metrics.get_snapshot();
+
+        // Uptime should be at least 100ms
+        assert!(snapshot.uptime.as_millis() >= 100);
+    }
+
+    #[test]
+    fn test_concurrent_updates() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let metrics = Arc::new(Metrics::new());
+        let mut handles = vec![];
+
+        // Spawn multiple threads updating metrics concurrently
+        for i in 0..10 {
+            let metrics_clone = Arc::clone(&metrics);
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    metrics_clone.record_query(
+                        if i % 2 == 0 {
+                            Protocol::Udp
+                        } else {
+                            Protocol::Tcp
+                        },
+                        i % 3 == 0,
+                    );
+                    metrics_clone.record_response(ResponseCode::NoError);
+                    metrics_clone.record_query_type(RecordType::A);
+                    metrics_clone.record_latency(Duration::from_micros(100));
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let snapshot = metrics.get_snapshot();
+
+        // Should have recorded 1000 total queries (10 threads * 100 queries)
+        assert_eq!(snapshot.total_queries, 1000);
+        assert_eq!(snapshot.noerror_responses, 1000);
+    }
+
+    #[test]
+    fn test_unknown_response_code() {
+        let metrics = Metrics::new();
+
+        // Test response codes that aren't explicitly handled
+        metrics.record_response(ResponseCode::NotImp);
+        metrics.record_response(ResponseCode::YXDomain);
+
+        let snapshot = metrics.get_snapshot();
+
+        // These shouldn't increment any specific counter
+        assert_eq!(snapshot.noerror_responses, 0);
+        assert_eq!(snapshot.nxdomain_responses, 0);
+        assert_eq!(snapshot.servfail_responses, 0);
+        assert_eq!(snapshot.refused_responses, 0);
+        assert_eq!(snapshot.formerr_responses, 0);
+    }
 }
