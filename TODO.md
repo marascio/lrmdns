@@ -30,7 +30,7 @@ No known bugs at this time.
 ## Testing
 
 - [ ] Fuzz testing for packet parser
-- [ ] Property-based testing for DNS protocol compliance
+- [x] Property-based testing for DNS protocol compliance
 - [ ] Load testing scenarios
 - [ ] Chaos engineering tests (network failures, etc.)
 - [ ] CI/CD pipeline integration (GitHub Actions)
