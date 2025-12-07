@@ -27,6 +27,20 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub dnssec: Option<DnssecConfig>,
+
+    #[serde(default)]
+    pub tcp: Option<TcpConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct TcpConfig {
+    /// Idle timeout for TCP connections in seconds (default: 30)
+    #[serde(default = "default_tcp_idle_timeout")]
+    pub idle_timeout: u64,
+
+    /// Maximum number of queries per TCP connection (default: 100)
+    #[serde(default = "default_tcp_max_queries")]
+    pub max_queries_per_connection: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -61,6 +75,14 @@ fn default_workers() -> usize {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_tcp_idle_timeout() -> u64 {
+    30
+}
+
+fn default_tcp_max_queries() -> usize {
+    100
 }
 
 impl Config {
@@ -480,5 +502,93 @@ zones:
         let config: Config = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(config.zones[0].name, ".");
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_tcp_config_defaults() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Config without TCP settings should use defaults
+        let yaml = format!(
+            r#"
+server:
+  listen: "127.0.0.1:5353"
+zones:
+  - name: example.com
+    file: {}
+"#,
+            temp_file.path().display()
+        );
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(config.server.tcp, None);
+    }
+
+    #[test]
+    fn test_tcp_config_custom_values() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Config with custom TCP settings
+        let yaml = format!(
+            r#"
+server:
+  listen: "127.0.0.1:5353"
+  tcp:
+    idle_timeout: 60
+    max_queries_per_connection: 200
+zones:
+  - name: example.com
+    file: {}
+"#,
+            temp_file.path().display()
+        );
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert!(config.server.tcp.is_some());
+
+        let tcp_config = config.server.tcp.unwrap();
+        assert_eq!(tcp_config.idle_timeout, 60);
+        assert_eq!(tcp_config.max_queries_per_connection, 200);
+    }
+
+    #[test]
+    fn test_tcp_config_partial_values() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Config with only idle_timeout specified, max_queries should default
+        let yaml = format!(
+            r#"
+server:
+  listen: "127.0.0.1:5353"
+  tcp:
+    idle_timeout: 45
+zones:
+  - name: example.com
+    file: {}
+"#,
+            temp_file.path().display()
+        );
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert!(config.server.tcp.is_some());
+
+        let tcp_config = config.server.tcp.unwrap();
+        assert_eq!(tcp_config.idle_timeout, 45);
+        assert_eq!(tcp_config.max_queries_per_connection, 100); // default
     }
 }

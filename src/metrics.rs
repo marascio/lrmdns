@@ -34,6 +34,11 @@ pub struct Metrics {
     // Errors
     pub errors: AtomicU64,
 
+    // TCP connection metrics
+    pub tcp_connections: AtomicU64,
+    pub tcp_queries_per_connection: AtomicU64,
+    pub tcp_connection_timeouts: AtomicU64,
+
     // Start time
     start_time: Instant,
 }
@@ -56,8 +61,24 @@ impl Metrics {
             max_latency_us: AtomicU64::new(0),
             rate_limited: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            tcp_connections: AtomicU64::new(0),
+            tcp_queries_per_connection: AtomicU64::new(0),
+            tcp_connection_timeouts: AtomicU64::new(0),
             start_time: Instant::now(),
         }
+    }
+
+    pub fn record_tcp_connection(&self) {
+        self.tcp_connections.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_connection_closed(&self, queries_handled: u64) {
+        self.tcp_queries_per_connection
+            .fetch_add(queries_handled, Ordering::Relaxed);
+    }
+
+    pub fn record_tcp_connection_timeout(&self) {
+        self.tcp_connection_timeouts.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_query(&self, protocol: Protocol, edns: bool) {
@@ -133,6 +154,14 @@ impl Metrics {
             min_latency
         };
 
+        let tcp_conn = self.tcp_connections.load(Ordering::Relaxed);
+        let tcp_total_queries = self.tcp_queries_per_connection.load(Ordering::Relaxed);
+        let avg_queries_per_conn = if tcp_conn > 0 {
+            tcp_total_queries as f64 / tcp_conn as f64
+        } else {
+            0.0
+        };
+
         MetricsSnapshot {
             total_queries: total,
             udp_queries: self.udp_queries.load(Ordering::Relaxed),
@@ -149,6 +178,9 @@ impl Metrics {
             max_latency_us: self.max_latency_us.load(Ordering::Relaxed),
             rate_limited: self.rate_limited.load(Ordering::Relaxed),
             errors: self.errors.load(Ordering::Relaxed),
+            tcp_connections: tcp_conn,
+            avg_queries_per_connection: avg_queries_per_conn,
+            tcp_connection_timeouts: self.tcp_connection_timeouts.load(Ordering::Relaxed),
             uptime: self.start_time.elapsed(),
         }
     }
@@ -176,6 +208,9 @@ pub struct MetricsSnapshot {
     pub max_latency_us: u64,
     pub rate_limited: u64,
     pub errors: u64,
+    pub tcp_connections: u64,
+    pub avg_queries_per_connection: f64,
+    pub tcp_connection_timeouts: u64,
     pub uptime: Duration,
 }
 
@@ -225,6 +260,15 @@ impl MetricsSnapshot {
 
         if self.errors > 0 {
             tracing::info!("Errors: {}", self.errors);
+        }
+
+        if self.tcp_connections > 0 {
+            tracing::info!(
+                "TCP connections: total={} avg_queries={:.2} timeouts={}",
+                self.tcp_connections,
+                self.avg_queries_per_connection,
+                self.tcp_connection_timeouts
+            );
         }
     }
 }
@@ -420,5 +464,74 @@ mod tests {
         assert_eq!(snapshot.servfail_responses, 0);
         assert_eq!(snapshot.refused_responses, 0);
         assert_eq!(snapshot.formerr_responses, 0);
+    }
+
+    #[test]
+    fn test_tcp_connection_metrics() {
+        let metrics = Metrics::new();
+
+        // Record TCP connections
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection();
+
+        let snapshot = metrics.get_snapshot();
+        assert_eq!(snapshot.tcp_connections, 3);
+        assert_eq!(snapshot.avg_queries_per_connection, 0.0);
+    }
+
+    #[test]
+    fn test_tcp_queries_per_connection() {
+        let metrics = Metrics::new();
+
+        // Record connections and queries
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection_closed(5);
+
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection_closed(3);
+
+        let snapshot = metrics.get_snapshot();
+        assert_eq!(snapshot.tcp_connections, 2);
+        assert_eq!(snapshot.avg_queries_per_connection, 4.0); // (5 + 3) / 2
+    }
+
+    #[test]
+    fn test_tcp_connection_timeouts() {
+        let metrics = Metrics::new();
+
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection_timeout();
+
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection_timeout();
+
+        let snapshot = metrics.get_snapshot();
+        assert_eq!(snapshot.tcp_connection_timeouts, 2);
+    }
+
+    #[test]
+    fn test_tcp_metrics_zero_connections() {
+        let metrics = Metrics::new();
+
+        // No connections recorded
+        let snapshot = metrics.get_snapshot();
+
+        assert_eq!(snapshot.tcp_connections, 0);
+        assert_eq!(snapshot.avg_queries_per_connection, 0.0);
+        assert_eq!(snapshot.tcp_connection_timeouts, 0);
+    }
+
+    #[test]
+    fn test_tcp_connection_with_zero_queries() {
+        let metrics = Metrics::new();
+
+        // Connection that handled zero queries
+        metrics.record_tcp_connection();
+        metrics.record_tcp_connection_closed(0);
+
+        let snapshot = metrics.get_snapshot();
+        assert_eq!(snapshot.tcp_connections, 1);
+        assert_eq!(snapshot.avg_queries_per_connection, 0.0);
     }
 }
