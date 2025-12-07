@@ -8,45 +8,51 @@ load '../bats/test_helper/bats-assert/load'
 # Tests for various SOA record format support
 
 @test "Single-line SOA format" {
+    # Get unique port and temp file for this test
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-soa-single.yaml"
+
     # Create temporary config for this zone
-    cat > /tmp/soa-single-line.yaml <<EOF
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15354"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test.example.
     file: $(pwd)/fixtures/zones/soa-single-line.zone
 EOF
 
-    start_server /tmp/soa-single-line.yaml 15354
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15354 test.example. SOA +short
+    run dig @127.0.0.1 -p "$port" test.example. SOA +short
     assert_success
     assert_output --partial "ns1.test.example"
     assert_output --partial "hostmaster.test.example"
     assert_output --partial "2024120601"
 
     # Query A record to ensure zone works
-    result=$(dig @127.0.0.1 -p 15354 www.test.example. A +short)
+    result=$(dig @127.0.0.1 -p "$port" www.test.example. A +short)
     assert_equal "$result" "192.0.2.100"
 
-    stop_server
-    rm -f /tmp/soa-single-line.yaml
+    cleanup_server
 }
 
 @test "Multi-line SOA with detailed comments" {
-    cat > /tmp/soa-multiline-comments.yaml <<EOF
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-soa-comments.yaml"
+
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15355"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test2.example.
     file: $(pwd)/fixtures/zones/soa-multiline-comments.zone
 EOF
 
-    start_server /tmp/soa-multiline-comments.yaml 15355
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15355 test2.example. SOA +short
+    run dig @127.0.0.1 -p "$port" test2.example. SOA +short
     assert_success
     assert_output --partial "ns1.test2.example"
     assert_output --partial "admin.test2.example"
@@ -55,107 +61,115 @@ EOF
     assert_output --partial "3600"
 
     # Query MX record
-    run dig @127.0.0.1 -p 15355 test2.example. MX +short
+    run dig @127.0.0.1 -p "$port" test2.example. MX +short
     assert_success
     assert_output --partial "mail.test2.example"
 
-    stop_server
-    rm -f /tmp/soa-multiline-comments.yaml
+    cleanup_server
 }
 
 @test "Multi-line SOA compact (no comments)" {
-    cat > /tmp/soa-multiline-compact.yaml <<EOF
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-soa-compact.yaml"
+
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15356"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test3.example.
     file: $(pwd)/fixtures/zones/soa-multiline-compact.zone
 EOF
 
-    start_server /tmp/soa-multiline-compact.yaml 15356
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15356 test3.example. SOA +short
+    run dig @127.0.0.1 -p "$port" test3.example. SOA +short
     assert_success
     assert_output --partial "2024120603"
     assert_output --partial "14400"
 
     # Query NS record
-    run dig @127.0.0.1 -p 15356 test3.example. NS +short
+    run dig @127.0.0.1 -p "$port" test3.example. NS +short
     assert_success
     assert_output --partial "ns1.test3.example"
 
-    stop_server
-    rm -f /tmp/soa-multiline-compact.yaml
+    cleanup_server
 }
 
 @test "Multi-line SOA with mixed grouping" {
-    cat > /tmp/soa-multiline-mixed.yaml <<EOF
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-soa-mixed.yaml"
+
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15357"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test4.example.
     file: $(pwd)/fixtures/zones/soa-multiline-mixed.zone
 EOF
 
-    start_server /tmp/soa-multiline-mixed.yaml 15357
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15357 test4.example. SOA +short
+    run dig @127.0.0.1 -p "$port" test4.example. SOA +short
     assert_success
     assert_output --partial "2024120604"
     assert_output --partial "10800"
     assert_output --partial "604800"
 
     # Query CNAME record
-    run dig @127.0.0.1 -p 15357 ftp.test4.example. A +short
+    run dig @127.0.0.1 -p "$port" ftp.test4.example. A +short
     assert_success
     assert_output --partial "192.0.2.90"
 
-    stop_server
-    rm -f /tmp/soa-multiline-mixed.yaml
+    cleanup_server
 }
 
 @test "Multi-line SOA with tabs and mixed whitespace" {
-    cat > /tmp/soa-tabs-spaces.yaml <<EOF
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-soa-tabs.yaml"
+
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15358"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test5.example.
     file: $(pwd)/fixtures/zones/soa-tabs-and-spaces.zone
 EOF
 
-    start_server /tmp/soa-tabs-spaces.yaml 15358
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15358 test5.example. SOA +short
+    run dig @127.0.0.1 -p "$port" test5.example. SOA +short
     assert_success
     assert_output --partial "2024120605"
     assert_output --partial "14400"
     assert_output --partial "7200"
 
     # Query A record
-    result=$(dig @127.0.0.1 -p 15358 ns1.test5.example. A +short)
+    result=$(dig @127.0.0.1 -p "$port" ns1.test5.example. A +short)
     assert_equal "$result" "192.0.2.91"
 
-    stop_server
-    rm -f /tmp/soa-tabs-spaces.yaml
+    cleanup_server
 }
 
 @test "Standard multi-line SOA (basic.zone)" {
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-basic.yaml"
+
     # This tests the standard format we use in basic.zone
-    cat > /tmp/basic-soa-test.yaml <<EOF
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15359"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: example.com.
     file: $(pwd)/fixtures/zones/basic.zone
 EOF
 
-    start_server /tmp/basic-soa-test.yaml 15359
+    start_server "$config" "$port"
 
     # Query SOA record
-    run dig @127.0.0.1 -p 15359 example.com. SOA +short
+    run dig @127.0.0.1 -p "$port" example.com. SOA +short
     assert_success
     assert_output --partial "ns1.example.com"
     assert_output --partial "admin.example.com"
@@ -163,15 +177,17 @@ EOF
     assert_output --partial "7200"
     assert_output --partial "86400"
 
-    stop_server
-    rm -f /tmp/basic-soa-test.yaml
+    cleanup_server
 }
 
 @test "All SOA formats return valid authoritative responses" {
+    local port=$(get_unique_port)
+    local config="$(get_temp_prefix)-multi-zone.yaml"
+
     # Test that all formats produce authoritative responses
-    cat > /tmp/multi-zone-soa.yaml <<EOF
+    cat > "$config" <<EOF
 server:
-  listen: "127.0.0.1:15360"
+  listen: "127.0.0.1:${port}"
 zones:
   - name: test.example.
     file: $(pwd)/fixtures/zones/soa-single-line.zone
@@ -181,15 +197,14 @@ zones:
     file: $(pwd)/fixtures/zones/soa-multiline-compact.zone
 EOF
 
-    start_server /tmp/multi-zone-soa.yaml 15360
+    start_server "$config" "$port"
 
     # Check each zone has authoritative flag
     for zone in test.example test2.example test3.example; do
-        run dig @127.0.0.1 -p 15360 $zone SOA +noall +comments
+        run dig @127.0.0.1 -p "$port" $zone SOA +noall +comments
         assert_success
         assert_output --regexp "flags:.*aa"
     done
 
-    stop_server
-    rm -f /tmp/multi-zone-soa.yaml
+    cleanup_server
 }

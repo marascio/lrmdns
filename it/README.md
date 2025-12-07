@@ -19,20 +19,21 @@ This directory contains integration tests that validate lrmdns functionality usi
 - **tcpreplay** - For PCAP replay tests
 - **python3 + scapy** - For PCAP generation
 - **jq** - For JSON parsing in API tests
+- **GNU parallel** - For parallel test execution (BATS `--jobs` support)
 
 ### Installation
 
 #### macOS
 
 ```bash
-brew install bind curl jq tcpreplay
+brew install bind curl jq tcpreplay parallel
 pip3 install scapy
 ```
 
 #### Ubuntu/Debian
 
 ```bash
-apt-get install dnsutils curl jq tcpreplay
+apt-get install dnsutils curl jq tcpreplay parallel
 pip3 install scapy
 ```
 
@@ -53,8 +54,14 @@ cd .. && cargo build --release && cd it
 ## Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (sequential)
 ./run-tests.sh
+
+# Run tests in parallel (auto-detect CPU cores)
+./run-tests.sh --parallel
+
+# Run tests in parallel with specific number of jobs
+./run-tests.sh -j 4
 
 # Run specific test file
 bats/bats-core/bin/bats tests/01-basic-queries.bats
@@ -64,6 +71,27 @@ bats/bats-core/bin/bats tests/01-basic-queries.bats
 
 # Run only tests matching pattern
 ./run-tests.sh --filter "A record"
+
+# Combine parallel and other options
+./run-tests.sh --parallel --verbose
+```
+
+### Parallel Execution
+
+Tests are designed to run in parallel safely by:
+- Auto-assigning unique ports (20000+) per test based on `BATS_TEST_NUMBER`
+- Using test-specific temporary files
+- Avoiding shared state between tests
+
+**Note**: Parallel execution requires GNU `parallel` to be installed (see Optional Prerequisites above).
+
+Parallel execution can significantly reduce total test time. Example:
+```bash
+# Sequential: ~10-15 seconds
+./run-tests.sh
+
+# Parallel with 4 jobs: ~3-5 seconds
+./run-tests.sh -j 4
 ```
 
 ## Test Organization

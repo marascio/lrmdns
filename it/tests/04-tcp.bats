@@ -6,11 +6,11 @@ load '../bats/test_helper/bats-support/load'
 load '../bats/test_helper/bats-assert/load'
 
 setup() {
-    start_server fixtures/configs/basic.yaml 15353
+    start_server fixtures/configs/basic.yaml
 }
 
 teardown() {
-    stop_server
+    cleanup_server
 }
 
 @test "A record query over TCP returns correct IP" {

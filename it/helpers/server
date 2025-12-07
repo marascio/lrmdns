@@ -1,18 +1,56 @@
 #!/usr/bin/env bash
 # Server lifecycle management for lrmdns integration tests
 
-# Start lrmdns server
-# Args: $1 = config file, $2 = port (optional)
-start_server() {
-    local config="${1:-fixtures/configs/basic.yaml}"
-    local port="${2:-15353}"
+# Get a unique port for this test (based on BATS test number or process ID)
+# This allows parallel test execution without port conflicts
+get_unique_port() {
+    # Use BATS_TEST_NUMBER if available (parallel mode), otherwise use process ID
+    local base_port=20000
+    if [ -n "$BATS_TEST_NUMBER" ]; then
+        echo $((base_port + BATS_TEST_NUMBER))
+    else
+        echo $((base_port + $$ % 10000))
+    fi
+}
 
-    # Kill any existing instance
+# Get unique temp file prefix for this test
+get_temp_prefix() {
+    if [ -n "$BATS_TEST_NUMBER" ]; then
+        echo "/tmp/lrmdns-test-${BATS_TEST_NUMBER}"
+    else
+        echo "/tmp/lrmdns-test-$$"
+    fi
+}
+
+# Start lrmdns server
+# Args: $1 = config file (will be modified with dynamic port), $2 = port (optional, auto-assigned if not provided)
+start_server() {
+    local source_config="${1:-fixtures/configs/basic.yaml}"
+    local port="${2:-$(get_unique_port)}"
+    local log_file="$(get_temp_prefix).log"
+    local temp_config="$(get_temp_prefix)-config.yaml"
+
+    # Kill any existing instance for this test
     stop_server || true
+
+    # If port was auto-assigned, create a temp config with the dynamic port
+    if [ "$#" -lt 2 ]; then
+        # Calculate API port (DNS port + 10000)
+        local api_port=$((port + 10000))
+
+        # Replace both DNS port and API port in config file
+        sed -e "s/listen: \"127\.0\.0\.1:[0-9]*\"/listen: \"127.0.0.1:${port}\"/" \
+            -e "s/api_listen: \"127\.0\.0\.1:[0-9]*\"/api_listen: \"127.0.0.1:${api_port}\"/" \
+            "$source_config" > "$temp_config"
+        local config="$temp_config"
+        export LRMDNS_API_PORT="$api_port"
+    else
+        local config="$source_config"
+    fi
 
     # Start server in background
     LRMDNS_BIN="${LRMDNS_BIN:-../target/release/lrmdns}"
-    $LRMDNS_BIN "$config" > /tmp/lrmdns-test.log 2>&1 &
+    $LRMDNS_BIN "$config" > "$log_file" 2>&1 &
     LRMDNS_PID=$!
 
     # Wait for server to start
@@ -20,6 +58,8 @@ start_server() {
 
     export LRMDNS_PID
     export LRMDNS_PORT="$port"
+    export LRMDNS_LOG="$log_file"
+    export LRMDNS_CONFIG="$config"
 }
 
 # Stop lrmdns server
@@ -59,14 +99,18 @@ dump_metrics() {
 }
 
 # Query metrics API
-# Args: $1 = API port (default 8080)
+# Args: $1 = API port (defaults to LRMDNS_API_PORT or 8080)
 get_metrics() {
-    local api_port="${1:-8080}"
+    local api_port="${1:-${LRMDNS_API_PORT:-8080}}"
     curl -s "http://127.0.0.1:${api_port}/metrics"
 }
 
 # Cleanup on exit
 cleanup_server() {
     stop_server
-    rm -f /tmp/lrmdns-test.log
+    if [ -n "$LRMDNS_LOG" ]; then
+        rm -f "$LRMDNS_LOG"
+    fi
+    # Clean up any temp config files created by this test
+    rm -f "$(get_temp_prefix)"*.yaml 2>/dev/null || true
 }
