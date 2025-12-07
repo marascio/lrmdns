@@ -1,5 +1,6 @@
 mod api;
 mod config;
+mod dnssec;
 mod metrics;
 mod protocol;
 mod ratelimit;

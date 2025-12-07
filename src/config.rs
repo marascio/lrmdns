@@ -24,6 +24,21 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub api_listen: Option<String>,
+
+    #[serde(default)]
+    pub dnssec: Option<DnssecConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DnssecConfig {
+    #[serde(default)]
+    pub validate_signatures: bool,
+
+    #[serde(default)]
+    pub require_dnssec: bool,
+
+    #[serde(default = "default_auto_include_dnssec")]
+    pub auto_include_dnssec: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -34,6 +49,10 @@ pub struct ZoneConfig {
 
 fn default_listen() -> String {
     "0.0.0.0:53".to_string()
+}
+
+fn default_auto_include_dnssec() -> bool {
+    true
 }
 
 fn default_workers() -> usize {

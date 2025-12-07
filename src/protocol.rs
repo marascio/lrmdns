@@ -111,6 +111,21 @@ impl QueryProcessor {
                 for record in records {
                     response.add_answer(record.clone());
                 }
+
+                // If DNSSEC OK flag is set, include RRSIG records
+                if dnssec_ok {
+                    if let Some(rrsigs) = zone.lookup(qname, RecordType::SIG) {
+                        for rrsig in rrsigs {
+                            // Check if this RRSIG covers the queried record type
+                            if let Some(hickory_proto::rr::RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig))) = rrsig.data() {
+                                if sig.type_covered() == qtype {
+                                    response.add_answer(rrsig.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
                 response.set_response_code(ResponseCode::NoError);
                 tracing::debug!("Found {} records for {} {:?}", records.len(), qname, qtype);
             }

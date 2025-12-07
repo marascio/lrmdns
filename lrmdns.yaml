@@ -27,6 +27,17 @@ server:
   # Uncomment to enable:
   # rate_limit: 100
 
+  # DNSSEC configuration
+  # Default: none (DNSSEC serves pre-signed records only)
+  # Uncomment to enable validation:
+  # dnssec:
+  #   # Validate DNSSEC signatures (currently not fully implemented)
+  #   validate_signatures: false
+  #   # Require DNSSEC for all responses
+  #   require_dnssec: false
+  #   # Automatically include DNSSEC records when DO flag is set
+  #   auto_include_dnssec: true
+
 # Zone configuration
 # ==================
 zones:

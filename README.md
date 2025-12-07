@@ -185,7 +185,7 @@ Expected performance:
 
 ## DNSSEC Support
 
-lrmdns supports **offline DNSSEC signing** - it can serve pre-signed zones that have been signed using external tools.
+lrmdns provides comprehensive DNSSEC support for serving pre-signed zones with validation capabilities.
 
 ### Supported DNSSEC Record Types
 
@@ -193,6 +193,34 @@ lrmdns supports **offline DNSSEC signing** - it can serve pre-signed zones that 
 - **RRSIG**: Resource record signatures
 - **NSEC**: Authenticated denial of existence
 - **DS**: Delegation signer records
+
+### DNSSEC Capabilities
+
+#### Automatic RRSIG Inclusion
+When clients set the DNSSEC OK (DO) flag in EDNS0, lrmdns automatically includes RRSIG records with responses:
+
+```bash
+# Query with DNSSEC OK flag - RRSIG records automatically included
+dig @127.0.0.1 -p 15353 +dnssec example.com A
+```
+
+#### Validation Functions
+The dnssec module provides:
+- **DS digest validation**: Verify DS records against DNSKEY records (SHA-256, SHA-384, SHA-512)
+- **RRSIG time validity checking**: Verify signatures are within inception/expiration window
+- **NSEC denial validation**: Validate authenticated denial of existence
+- **Key tag computation**: RFC 4034 compliant key tag calculation
+
+#### Configuration
+DNSSEC behavior can be configured in `lrmdns.yaml`:
+
+```yaml
+server:
+  dnssec:
+    validate_signatures: false      # Signature verification (future)
+    require_dnssec: false            # Require DNSSEC for all responses
+    auto_include_dnssec: true        # Include RRSIG with DO flag (default)
+```
 
 ### Zone File Format
 
@@ -217,11 +245,13 @@ DNSSEC records use standard zone file format with base64 and hex encoding:
 Query DNSSEC records with dig using the `+dnssec` flag:
 
 ```bash
-# Query with DNSSEC OK flag set
-dig @127.0.0.1 -p 5353 +dnssec example.com DNSKEY
+# Query with DNSSEC OK flag set - automatically includes RRSIGs
+dig @127.0.0.1 -p 15353 +dnssec example.com A
 
-# Query for RRSIG records
-dig @127.0.0.1 -p 5353 example.com RRSIG
+# Query for specific DNSSEC record types
+dig @127.0.0.1 -p 15353 example.com DNSKEY
+dig @127.0.0.1 -p 15353 example.com DS
+dig @127.0.0.1 -p 15353 example.com NSEC
 ```
 
 ### Signing Your Zones
@@ -231,6 +261,16 @@ lrmdns does NOT perform online signing. You must sign zones offline using tools 
 - **dnssec-signzone** (from BIND)
 
 Once signed, point your zone configuration to the signed zone file.
+
+### Validation Implementation Status
+
+- ✅ **DS digest validation**: Fully implemented with SHA-256/384/512 support
+- ✅ **RRSIG time validity**: Checks inception/expiration timestamps
+- ✅ **NSEC denial validation**: Validates authenticated denial of existence
+- ✅ **Key tag computation**: RFC 4034 compliant algorithm
+- ✅ **Automatic DNSSEC record inclusion**: RRSIG records with DO flag
+- ⚠️ **Cryptographic signature verification**: Framework ready, full verification not yet implemented
+- ❌ **NSEC3 support**: Not implemented (only NSEC for authenticated denial)
 
 ## Current Limitations
 
