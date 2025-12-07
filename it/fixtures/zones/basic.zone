@@ -1,0 +1,27 @@
+$ORIGIN example.com.
+$TTL 3600
+
+@ IN SOA ns1.example.com. admin.example.com. (
+    2024010101  ; Serial
+    7200        ; Refresh
+    3600        ; Retry
+    1209600     ; Expire
+    86400       ; Minimum TTL
+)
+
+@ IN NS ns1.example.com.
+@ IN NS ns2.example.com.
+
+ns1 IN A 192.0.2.1
+ns2 IN A 192.0.2.2
+
+www IN A 192.0.2.10
+www IN AAAA 2001:db8::10
+
+mail IN A 192.0.2.20
+@ IN MX 10 mail.example.com.
+
+@ IN TXT "v=spf1 mx -all"
+_dmarc IN TXT "v=DMARC1; p=none"
+
+ftp IN CNAME www.example.com.

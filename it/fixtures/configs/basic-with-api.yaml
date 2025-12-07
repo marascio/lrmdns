@@ -1,0 +1,9 @@
+server:
+  listen: "127.0.0.1:15353"
+  workers: 4
+  log_level: "info"
+  api_listen: "127.0.0.1:18080"
+
+zones:
+  - name: example.com.
+    file: fixtures/zones/basic.zone
