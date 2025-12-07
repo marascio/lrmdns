@@ -74,6 +74,7 @@ async fn main() -> Result<()> {
         config.server.listen.clone(),
         metrics.clone(),
         rate_limiter.clone(),
+        config.server.tcp.clone(),
     );
 
     tracing::info!("DNS server starting on {}", config.server.listen);

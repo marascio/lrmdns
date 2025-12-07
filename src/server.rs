@@ -1,3 +1,4 @@
+use crate::config::TcpConfig;
 use crate::metrics::Metrics;
 use crate::protocol::QueryProcessor;
 use crate::ratelimit::RateLimiter;
@@ -5,6 +6,7 @@ use anyhow::{Context, Result};
 use hickory_proto::op::Message;
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
@@ -16,6 +18,7 @@ pub struct DnsServer {
     listen_addr: String,
     metrics: Arc<Metrics>,
     rate_limiter: Option<Arc<RateLimiter>>,
+    tcp_config: Option<TcpConfig>,
 }
 
 impl DnsServer {
@@ -24,12 +27,14 @@ impl DnsServer {
         listen_addr: String,
         metrics: Arc<Metrics>,
         rate_limiter: Option<Arc<RateLimiter>>,
+        tcp_config: Option<TcpConfig>,
     ) -> Self {
         DnsServer {
             processor: Arc::new(processor),
             listen_addr,
             metrics,
             rate_limiter,
+            tcp_config,
         }
     }
 
@@ -94,6 +99,7 @@ impl DnsServer {
                     let metrics = self.metrics.clone();
                     let rate_limiter = self.rate_limiter.clone();
                     let zones = processor.get_zones();
+                    let tcp_config = self.tcp_config.clone();
 
                     // Spawn a task to handle the connection
                     tokio::spawn(async move {
@@ -104,6 +110,7 @@ impl DnsServer {
                             metrics,
                             rate_limiter,
                             zones,
+                            tcp_config,
                         )
                         .await
                         {
@@ -270,25 +277,58 @@ async fn handle_tcp_connection(
     metrics: Arc<Metrics>,
     rate_limiter: Option<Arc<RateLimiter>>,
     zones: Arc<tokio::sync::RwLock<crate::zone::ZoneStore>>,
+    tcp_config: Option<TcpConfig>,
 ) -> Result<()> {
     use crate::metrics::Protocol;
     use std::time::Instant;
 
     tracing::debug!("TCP connection from {}", addr);
 
+    // Record new TCP connection
+    metrics.record_tcp_connection();
+
+    // Get TCP configuration values with defaults
+    let idle_timeout_secs = tcp_config.as_ref().map(|c| c.idle_timeout).unwrap_or(30);
+    let max_queries = tcp_config
+        .as_ref()
+        .map(|c| c.max_queries_per_connection)
+        .unwrap_or(100);
+
+    let idle_timeout = Duration::from_secs(idle_timeout_secs);
+    let mut queries_handled: u64 = 0;
+
     loop {
+        // Check if we've hit the max queries limit
+        if queries_handled >= max_queries as u64 {
+            tracing::debug!(
+                "TCP connection from {} reached max queries ({})",
+                addr,
+                max_queries
+            );
+            metrics.record_tcp_connection_closed(queries_handled);
+            return Ok(());
+        }
         let start = Instant::now();
-        // Read 2-byte length prefix
+        // Read 2-byte length prefix with timeout
         let mut len_buf = [0u8; 2];
-        match stream.read_exact(&mut len_buf).await {
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+        match tokio::time::timeout(idle_timeout, stream.read_exact(&mut len_buf)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 // Client closed connection
                 tracing::debug!("TCP connection closed by {}", addr);
+                metrics.record_tcp_connection_closed(queries_handled);
                 return Ok(());
             }
-            Err(e) => {
+            Ok(Err(e)) => {
+                metrics.record_tcp_connection_closed(queries_handled);
                 return Err(e).context("Failed to read length prefix");
+            }
+            Err(_) => {
+                // Timeout
+                tracing::debug!("TCP connection from {} timed out", addr);
+                metrics.record_tcp_connection_timeout();
+                metrics.record_tcp_connection_closed(queries_handled);
+                return Ok(());
             }
         }
 
@@ -478,6 +518,9 @@ async fn handle_tcp_connection(
         // Record metrics
         metrics.record_response(response.response_code());
         metrics.record_latency(start.elapsed());
+
+        // Increment query counter for this connection
+        queries_handled += 1;
     }
 }
 
