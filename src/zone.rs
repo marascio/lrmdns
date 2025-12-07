@@ -765,4 +765,263 @@ mod tests {
             assert!(matches!(rdata, RData::DNSSEC(_)), "Should be DNSSEC RData");
         }
     }
+
+    #[test]
+    fn test_malformed_zone_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Missing SOA record
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN NS ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        assert!(result.is_err(), "Should fail without SOA record");
+    }
+
+    #[test]
+    fn test_invalid_ttl() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL invalid").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        temp_file.flush().unwrap();
+
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        assert!(result.is_err(), "Should fail with invalid TTL");
+    }
+
+    #[test]
+    fn test_invalid_record_data() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN A invalid.ip.address").unwrap();
+        temp_file.flush().unwrap();
+
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        // Invalid A record causes parse error
+        assert!(result.is_err(), "Should fail with invalid A record");
+    }
+
+    #[test]
+    fn test_malformed_soa() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        // SOA with insufficient fields
+        writeln!(temp_file, "@ IN SOA ns1.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        assert!(result.is_err(), "Should fail with malformed SOA");
+    }
+
+    #[test]
+    fn test_empty_zone_file() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        assert!(result.is_err(), "Should fail with empty zone file");
+    }
+
+    #[test]
+    fn test_invalid_base64_in_dnskey() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        // Invalid base64 in DNSKEY
+        writeln!(temp_file, "@ IN DNSKEY 256 3 8 !!!INVALID_BASE64!!!").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        // Invalid DNSKEY should be skipped
+        let dnskey_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DNSKEY);
+        assert!(dnskey_records.is_none(), "Invalid DNSKEY should be skipped");
+    }
+
+    #[test]
+    fn test_invalid_hex_in_ds() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        // Invalid hex in DS digest
+        writeln!(temp_file, "@ IN DS 12345 8 2 ZZZZZZ").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        // Invalid DS should be skipped
+        let ds_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::DS);
+        assert!(ds_records.is_none(), "Invalid DS should be skipped");
+    }
+
+    #[test]
+    fn test_very_long_domain_name() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        // Very long label (>63 characters, which violates DNS spec)
+        let long_label = "a".repeat(70);
+        writeln!(temp_file, "{} IN A 192.0.2.1", long_label).unwrap();
+        temp_file.flush().unwrap();
+
+        let result = parse_zone_file(temp_file.path(), "example.com.");
+        // Very long labels cause parse errors
+        assert!(result.is_err(), "Should fail with very long domain label");
+    }
+
+    #[test]
+    fn test_wildcard_with_specific_override() {
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 1,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let mut zone = Zone::new(origin.clone(), soa);
+
+        // Add wildcard
+        let wildcard_name = Name::from_str("*.example.com.").unwrap();
+        let wildcard_record = Record::from_rdata(
+            wildcard_name.clone(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 100))),
+        );
+        zone.add_record(wildcard_record);
+
+        // Add specific record
+        let specific_name = Name::from_str("www.example.com.").unwrap();
+        let specific_record = Record::from_rdata(
+            specific_name.clone(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 10))),
+        );
+        zone.add_record(specific_record);
+
+        // Test that specific overrides wildcard
+        let specific_result = zone.lookup(&specific_name, RecordType::A);
+        assert!(specific_result.is_some());
+        if let Some(RData::A(a)) = specific_result.unwrap()[0].data() {
+            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10), "Specific record should override wildcard");
+        }
+
+        // Test wildcard match
+        let random_name = Name::from_str("random.example.com.").unwrap();
+        let wildcard_result = zone.lookup_wildcard(&random_name, RecordType::A);
+        assert!(wildcard_result.is_some());
+        if let Some(RData::A(a)) = wildcard_result.unwrap()[0].data() {
+            assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 100), "Should match wildcard");
+        }
+    }
+
+    #[test]
+    fn test_nonexistent_record_type() {
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 1,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let zone = Zone::new(origin.clone(), soa);
+
+        // Query for record type that doesn't exist
+        let result = zone.lookup(&origin, RecordType::MX);
+        assert!(result.is_none(), "Should return None for non-existent record type");
+    }
+
+    #[test]
+    fn test_caa_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "@ IN CAA 0 issue \"letsencrypt.org\"").unwrap();
+        writeln!(temp_file, "@ IN CAA 0 issuewild \"letsencrypt.org\"").unwrap();
+        writeln!(temp_file, "@ IN CAA 0 iodef \"mailto:admin@example.com\"").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let caa_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::CAA);
+        assert!(caa_records.is_some());
+        assert_eq!(caa_records.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_ptr_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN 2.0.192.in-addr.arpa.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "1 IN PTR www.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "2.0.192.in-addr.arpa.").unwrap();
+        let ptr_records = zone.lookup(
+            &Name::from_str("1.2.0.192.in-addr.arpa.").unwrap(),
+            RecordType::PTR
+        );
+        assert!(ptr_records.is_some());
+    }
+
+    #[test]
+    fn test_srv_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(temp_file, "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400").unwrap();
+        writeln!(temp_file, "_http._tcp IN SRV 10 60 80 www.example.com.").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let srv_records = zone.lookup(
+            &Name::from_str("_http._tcp.example.com.").unwrap(),
+            RecordType::SRV
+        );
+        assert!(srv_records.is_some());
+    }
 }

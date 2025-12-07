@@ -418,4 +418,177 @@ mod tests {
             assert!(response_edns.dnssec_ok(), "DNSSEC OK flag should be set in response");
         }
     }
+
+    #[tokio::test]
+    async fn test_empty_query() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        // Query with no questions
+        let mut query = Message::new();
+        query.set_id(9999);
+        query.set_message_type(MessageType::Query);
+        query.set_op_code(OpCode::Query);
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 9999);
+        assert_eq!(response.response_code(), ResponseCode::FormErr);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_opcode() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(4444);
+        query.set_message_type(MessageType::Query);
+        query.set_op_code(OpCode::Update); // Not supported
+        query.add_query(Query::query(
+            Name::from_str("www.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 4444);
+        assert_eq!(response.response_code(), ResponseCode::NotImp);
+    }
+
+    #[tokio::test]
+    async fn test_query_for_different_zone() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(5555);
+        query.add_query(Query::query(
+            Name::from_str("www.different-zone.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 5555);
+        assert_eq!(response.response_code(), ResponseCode::Refused);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_queries_in_message() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        // DNS spec says multiple queries in one message are allowed but rarely used
+        let mut query = Message::new();
+        query.set_id(6666);
+        query.add_query(Query::query(
+            Name::from_str("www.example.com.").unwrap(),
+            RecordType::A,
+        ));
+        query.add_query(Query::query(
+            Name::from_str("mail.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        // We only process the first query
+        assert_eq!(response.id(), 6666);
+        assert_eq!(response.queries().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_query_without_recursion_desired() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(7777);
+        query.set_message_type(MessageType::Query);
+        query.set_op_code(OpCode::Query);
+        query.set_recursion_desired(false); // No recursion
+        query.add_query(Query::query(
+            Name::from_str("www.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 7777);
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+        assert!(!response.recursion_desired());
+        assert!(!response.recursion_available()); // We never do recursion
+    }
+
+    #[tokio::test]
+    async fn test_cname_without_target() {
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 2025120601,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let mut zone = Zone::new(origin.clone(), soa);
+
+        // Add CNAME pointing to non-existent target
+        let cname_record = Record::from_rdata(
+            Name::from_str("alias.example.com.").unwrap(),
+            3600,
+            RData::CNAME(hickory_proto::rr::rdata::CNAME(
+                Name::from_str("nonexistent.example.com.").unwrap()
+            )),
+        );
+        zone.add_record(cname_record);
+
+        let mut store = ZoneStore::new();
+        store.add_zone(zone);
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(8888);
+        query.add_query(Query::query(
+            Name::from_str("alias.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 8888);
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+        // Should have CNAME in answer but no A record
+        assert_eq!(response.answers().len(), 1);
+        assert!(matches!(response.answers()[0].data(), Some(RData::CNAME(_))));
+    }
+
+    #[tokio::test]
+    async fn test_axfr_query() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(9000);
+        query.add_query(Query::query(
+            Name::from_str("example.com.").unwrap(),
+            RecordType::AXFR,
+        ));
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        // AXFR is handled specially - response is marked for TCP streaming
+        assert_eq!(response.id(), 9000);
+        assert!(response.authoritative());
+        assert_eq!(response.queries().len(), 1);
+    }
 }
