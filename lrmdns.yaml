@@ -1,9 +1,64 @@
-server:
-  listen: "127.0.0.1:5353"
-  workers: 4
-  log_level: debug
-  # rate_limit: 100  # Optional: queries per second per IP
+# lrmdns DNS Server Configuration
+# ================================
 
+server:
+  # DNS server bind address and port
+  # Default: "0.0.0.0:53"
+  # Use 127.0.0.1 for localhost only, 0.0.0.0 for all interfaces
+  listen: "127.0.0.1:15353"
+
+  # Number of worker threads for async runtime
+  # Default: 4
+  # Recommended: number of CPU cores
+  workers: 4
+
+  # Logging level: trace, debug, info, warn, error
+  # Default: "info"
+  # Use "debug" for troubleshooting, "info" for production
+  log_level: info
+
+  # HTTP API server bind address and port
+  # Default: none (API disabled)
+  # Enables /health and /metrics endpoints
+  api_listen: "127.0.0.1:8080"
+
+  # Rate limiting: queries per second per IP address
+  # Default: none (rate limiting disabled)
+  # Uncomment to enable:
+  # rate_limit: 100
+
+# Zone configuration
+# ==================
 zones:
-  - name: example.com.
-    file: zones/example.com.zone
+  # Primary zone example
+  - name: example.com.        # Zone name (must end with .)
+    file: zones/example.com.zone  # Path to zone file
+
+  # Additional zones can be added:
+  # - name: example.org.
+  #   file: zones/example.org.zone
+  # - name: example.net.
+  #   file: zones/example.net.zone
+
+# Configuration Notes:
+# ====================
+#
+# 1. Zone files must exist before starting the server
+# 2. Zone names MUST end with a dot (.)
+# 3. Rate limiting applies per source IP address
+# 4. The server supports both UDP and TCP automatically
+# 5. EDNS0 is automatically enabled for clients that support it
+# 6. Use SIGHUP to reload zones without restarting the server
+# 7. Use SIGUSR1 to print current statistics to logs
+#
+# Example production configuration:
+# ----------------------------------
+# server:
+#   listen: "0.0.0.0:53"
+#   workers: 8
+#   log_level: warn
+#   api_listen: "127.0.0.1:8080"
+#   rate_limit: 1000
+# zones:
+#   - name: example.com.
+#     file: /var/lib/lrmdns/zones/example.com.zone
