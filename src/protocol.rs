@@ -64,17 +64,18 @@ impl QueryProcessor {
 
         // Check for EDNS0 support
         let edns = query.extensions();
-        let client_udp_size = if let Some(edns) = edns {
-            edns.max_payload()
+        let (client_udp_size, dnssec_ok) = if let Some(edns) = edns {
+            (edns.max_payload(), edns.dnssec_ok())
         } else {
-            512 // Default DNS UDP packet size
+            (512, false) // Default DNS UDP packet size, no DNSSEC
         };
 
         tracing::debug!(
-            "Query: name={} type={:?} edns_size={} from={}",
+            "Query: name={} type={:?} edns_size={} dnssec_ok={} from={}",
             qname,
             qtype,
             client_udp_size,
+            dnssec_ok,
             "unknown" // Will be filled in by server
         );
 
@@ -183,6 +184,10 @@ impl QueryProcessor {
             // Advertise our supported UDP payload size (4096 bytes)
             edns.set_max_payload(4096);
             edns.set_version(0);
+            // Set DNSSEC OK flag if client requested it
+            if dnssec_ok {
+                edns.set_dnssec_ok(true);
+            }
             response.set_edns(edns);
         }
 
@@ -376,6 +381,41 @@ mod tests {
         // Verify the answer is the specific IP, not wildcard
         if let Some(RData::A(a)) = response.answers()[0].data() {
             assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dnssec_ok_flag() {
+        let mut store = ZoneStore::new();
+        store.add_zone(create_test_zone());
+        let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+        let mut query = Message::new();
+        query.set_id(3333);
+        query.set_message_type(MessageType::Query);
+        query.set_op_code(OpCode::Query);
+        query.add_query(Query::query(
+            Name::from_str("www.example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        // Set EDNS with DNSSEC OK flag
+        let mut edns = hickory_proto::op::Edns::new();
+        edns.set_max_payload(4096);
+        edns.set_dnssec_ok(true);
+        query.set_edns(edns);
+
+        let response = processor.process_query(&query).await.unwrap();
+
+        assert_eq!(response.id(), 3333);
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+
+        // Verify EDNS is present in response
+        assert!(response.extensions().is_some(), "Response should have EDNS");
+
+        // Verify DNSSEC OK flag is set in response
+        if let Some(response_edns) = response.extensions() {
+            assert!(response_edns.dnssec_ok(), "DNSSEC OK flag should be set in response");
         }
     }
 }
