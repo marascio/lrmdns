@@ -281,4 +281,145 @@ zones:
         let config: Config = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(config.server.workers, 1000);
     }
+
+    #[test]
+    fn test_default_listen_address() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Config without explicit listen address should use default
+        let yaml = format!(r#"
+server:
+  workers: 4
+zones:
+  - name: example.com
+    file: {}
+"#, temp_file.path().display());
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(config.server.listen, "0.0.0.0:53");
+    }
+
+    #[test]
+    fn test_from_file_success() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut zone_file = NamedTempFile::new().unwrap();
+        writeln!(zone_file, "test zone").unwrap();
+        zone_file.flush().unwrap();
+
+        let mut config_file = NamedTempFile::new().unwrap();
+        writeln!(config_file, "server:").unwrap();
+        writeln!(config_file, "  listen: \"127.0.0.1:5353\"").unwrap();
+        writeln!(config_file, "zones:").unwrap();
+        writeln!(config_file, "  - name: example.com").unwrap();
+        writeln!(config_file, "    file: {}", zone_file.path().display()).unwrap();
+        config_file.flush().unwrap();
+
+        let config = Config::from_file(config_file.path()).unwrap();
+        assert_eq!(config.server.listen, "127.0.0.1:5353");
+        assert_eq!(config.zones.len(), 1);
+        assert_eq!(config.zones[0].name, "example.com");
+    }
+
+    #[test]
+    fn test_from_file_not_found() {
+        let result = Config::from_file("/nonexistent/path/to/config.yaml");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to read configuration file"));
+    }
+
+    #[test]
+    fn test_from_file_invalid_yaml() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut config_file = NamedTempFile::new().unwrap();
+        writeln!(config_file, "invalid: yaml: {{{{").unwrap();
+        config_file.flush().unwrap();
+
+        let result = Config::from_file(config_file.path());
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to parse YAML configuration"));
+    }
+
+    #[test]
+    fn test_all_defaults() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Minimal config, all optional fields should get defaults
+        let yaml = format!(r#"
+server: {{}}
+zones:
+  - name: example.com
+    file: {}
+"#, temp_file.path().display());
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+
+        // Verify all defaults
+        assert_eq!(config.server.listen, "0.0.0.0:53");
+        assert_eq!(config.server.workers, 4);
+        assert_eq!(config.server.log_level, "info");
+        assert_eq!(config.server.rate_limit, None);
+        assert_eq!(config.server.api_listen, None);
+    }
+
+    #[test]
+    fn test_validate_success() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut zone_file = NamedTempFile::new().unwrap();
+        writeln!(zone_file, "test").unwrap();
+        zone_file.flush().unwrap();
+
+        let yaml = format!(r#"
+server:
+  listen: "127.0.0.1:5353"
+zones:
+  - name: example.com
+    file: {}
+"#, zone_file.path().display());
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+
+        // Should validate successfully
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_partial_zone_name() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "test").unwrap();
+        temp_file.flush().unwrap();
+
+        // Zone name that's not empty but might be invalid
+        let yaml = format!(r#"
+server:
+  listen: "127.0.0.1:5353"
+zones:
+  - name: "."
+    file: {}
+"#, temp_file.path().display());
+
+        let config: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(config.zones[0].name, ".");
+        assert!(config.validate().is_ok());
+    }
 }
