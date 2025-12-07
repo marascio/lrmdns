@@ -613,4 +613,197 @@ mod tests {
         assert!(response.authoritative());
         assert_eq!(response.queries().len(), 1);
     }
+
+    mod proptests {
+        use super::*;
+        use crate::proptest_helpers::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn prop_query_id_matches_response(query_id in any::<u16>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(query_id);
+                    query.set_message_type(MessageType::Query);
+                    query.set_op_code(OpCode::Query);
+                    query.add_query(Query::query(
+                        Name::from_str("www.example.com.").unwrap(),
+                        RecordType::A,
+                    ));
+
+                    let response = processor.process_query(&query).await.unwrap();
+                    prop_assert_eq!(response.id(), query_id);
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_response_is_always_response_type(query_id in any::<u16>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(query_id);
+                    query.set_message_type(MessageType::Query);
+                    query.set_op_code(OpCode::Query);
+                    query.add_query(Query::query(
+                        Name::from_str("www.example.com.").unwrap(),
+                        RecordType::A,
+                    ));
+
+                    let response = processor.process_query(&query).await.unwrap();
+                    prop_assert_eq!(response.message_type(), MessageType::Response);
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_recursion_desired_flag_copied(rd in any::<bool>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(1234);
+                    query.set_message_type(MessageType::Query);
+                    query.set_op_code(OpCode::Query);
+                    query.set_recursion_desired(rd);
+                    query.add_query(Query::query(
+                        Name::from_str("www.example.com.").unwrap(),
+                        RecordType::A,
+                    ));
+
+                    let response = processor.process_query(&query).await.unwrap();
+                    prop_assert_eq!(response.recursion_desired(), rd);
+                    prop_assert!(!response.recursion_available());
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_authoritative_for_configured_zones(name in arb_dns_name()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let fqdn = format!("{}", name);
+                    let is_in_zone = fqdn.ends_with("example.com.");
+
+                    let mut query = Message::new();
+                    query.set_id(1);
+                    query.add_query(Query::query(name, RecordType::A));
+
+                    let response = processor.process_query(&query).await.unwrap();
+
+                    if is_in_zone {
+                        prop_assert!(response.authoritative());
+                    } else {
+                        prop_assert_eq!(response.response_code(), ResponseCode::Refused);
+                    }
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_empty_query_returns_formerr(query_id in any::<u16>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(query_id);
+                    query.set_message_type(MessageType::Query);
+                    query.set_op_code(OpCode::Query);
+
+                    let response = processor.process_query(&query).await.unwrap();
+                    prop_assert_eq!(response.response_code(), ResponseCode::FormErr);
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_unsupported_opcode_returns_notimp(query_id in any::<u16>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(query_id);
+                    query.set_message_type(MessageType::Query);
+                    query.set_op_code(OpCode::Update);
+                    query.add_query(Query::query(
+                        Name::from_str("www.example.com.").unwrap(),
+                        RecordType::A,
+                    ));
+
+                    let response = processor.process_query(&query).await.unwrap();
+                    prop_assert_eq!(response.response_code(), ResponseCode::NotImp);
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_response_has_question_section(name in arb_dns_name(), rtype in arb_record_type()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(1);
+                    query.add_query(Query::query(name.clone(), rtype));
+
+                    let response = processor.process_query(&query).await.unwrap();
+
+                    if response.response_code() != ResponseCode::FormErr {
+                        prop_assert_eq!(response.queries().len(), 1);
+                        if let Some(q) = response.queries().first() {
+                            prop_assert_eq!(q.name(), &name);
+                            prop_assert_eq!(q.query_type(), rtype);
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+
+            #[test]
+            fn prop_dnssec_ok_flag_preserved(dnssec_ok in any::<bool>()) {
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut store = ZoneStore::new();
+                    store.add_zone(create_test_zone());
+                    let processor = QueryProcessor::new(Arc::new(RwLock::new(store)));
+
+                    let mut query = Message::new();
+                    query.set_id(1);
+                    query.add_query(Query::query(
+                        Name::from_str("www.example.com.").unwrap(),
+                        RecordType::A,
+                    ));
+
+                    let mut edns = hickory_proto::op::Edns::new();
+                    edns.set_max_payload(4096);
+                    edns.set_dnssec_ok(dnssec_ok);
+                    query.set_edns(edns);
+
+                    let response = processor.process_query(&query).await.unwrap();
+
+                    if let Some(response_edns) = response.extensions() {
+                        prop_assert_eq!(response_edns.dnssec_ok(), dnssec_ok);
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+    }
 }

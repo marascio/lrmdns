@@ -7,6 +7,9 @@ mod ratelimit;
 mod server;
 mod zone;
 
+#[cfg(test)]
+mod proptest_helpers;
+
 use anyhow::{Context, Result};
 use config::Config;
 use metrics::Metrics;

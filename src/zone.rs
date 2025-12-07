@@ -1767,4 +1767,241 @@ $TTL 3600
         assert!(sshfp_records.is_some());
         assert_eq!(sshfp_records.unwrap().len(), 1);
     }
+
+    mod proptests {
+        use super::*;
+        use crate::proptest_helpers::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn prop_add_and_lookup_record_consistent(name in arb_dns_name(), ttl in arb_ttl()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let mut zone = Zone::new(origin.clone(), soa);
+
+                let record = Record::from_rdata(
+                    name.clone(),
+                    ttl,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+                );
+
+                zone.add_record(record.clone());
+
+                let result = zone.lookup(&name, RecordType::A);
+                prop_assert!(result.is_some(), "Added record should be retrievable");
+                prop_assert_eq!(result.unwrap().len(), 1);
+            }
+
+            #[test]
+            fn prop_lookup_nonexistent_name_returns_none(name in arb_dns_name()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let zone = Zone::new(origin, soa);
+
+                let result = zone.lookup(&name, RecordType::A);
+                prop_assert!(result.is_none(), "Lookup in empty zone should return None");
+            }
+
+            #[test]
+            fn prop_contains_name_after_add(name in arb_dns_name()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let mut zone = Zone::new(origin.clone(), soa);
+
+                let record = Record::from_rdata(
+                    name.clone(),
+                    3600,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+                );
+
+                zone.add_record(record);
+
+                prop_assert!(zone.contains_name(&name), "Zone should contain added name");
+            }
+
+            #[test]
+            fn prop_multiple_records_same_name_different_types(name in arb_dns_name()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let mut zone = Zone::new(origin.clone(), soa);
+
+                let a_record = Record::from_rdata(
+                    name.clone(),
+                    3600,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+                );
+                zone.add_record(a_record);
+
+                let aaaa_record = Record::from_rdata(
+                    name.clone(),
+                    3600,
+                    RData::AAAA(hickory_proto::rr::rdata::AAAA(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))),
+                );
+                zone.add_record(aaaa_record);
+
+                let a_result = zone.lookup(&name, RecordType::A);
+                let aaaa_result = zone.lookup(&name, RecordType::AAAA);
+
+                prop_assert!(a_result.is_some(), "A record should exist");
+                prop_assert!(aaaa_result.is_some(), "AAAA record should exist");
+                prop_assert_eq!(a_result.unwrap().len(), 1);
+                prop_assert_eq!(aaaa_result.unwrap().len(), 1);
+            }
+
+            #[test]
+            fn prop_zone_store_find_zone_consistency(zone_count in 1usize..=5) {
+                let mut store = ZoneStore::new();
+
+                for i in 0..zone_count {
+                    let origin = Name::from_str(&format!("zone{}.com.", i)).unwrap();
+                    let soa = SoaRecord {
+                        mname: Name::from_str(&format!("ns1.zone{}.com.", i)).unwrap(),
+                        rname: Name::from_str(&format!("admin.zone{}.com.", i)).unwrap(),
+                        serial: 1,
+                        refresh: 7200,
+                        retry: 3600,
+                        expire: 1209600,
+                        minimum: 86400,
+                    };
+                    let zone = Zone::new(origin, soa);
+                    store.add_zone(zone);
+                }
+
+                for i in 0..zone_count {
+                    let query_name = Name::from_str(&format!("www.zone{}.com.", i)).unwrap();
+                    let result = store.find_zone(&query_name);
+                    prop_assert!(result.is_some(), "Should find zone for www.zone{}.com", i);
+                }
+
+                let nonexistent = Name::from_str("www.nonexistent.com.").unwrap();
+                prop_assert!(store.find_zone(&nonexistent).is_none(), "Should not find nonexistent zone");
+            }
+
+            #[test]
+            fn prop_wildcard_does_not_match_exact_name(wildcard_suffix in arb_dns_label()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let mut zone = Zone::new(origin.clone(), soa);
+
+                let wildcard_name = Name::from_str(&format!("*.{}.example.com.", wildcard_suffix)).unwrap();
+                let wildcard_record = Record::from_rdata(
+                    wildcard_name.clone(),
+                    3600,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 100))),
+                );
+                zone.add_record(wildcard_record);
+
+                let specific_name = Name::from_str(&format!("www.{}.example.com.", wildcard_suffix)).unwrap();
+                let specific_record = Record::from_rdata(
+                    specific_name.clone(),
+                    3600,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 10))),
+                );
+                zone.add_record(specific_record);
+
+                let exact_result = zone.lookup(&specific_name, RecordType::A);
+                prop_assert!(exact_result.is_some(), "Exact name should exist");
+
+                if let Some(records) = exact_result
+                    && let Some(RData::A(a)) = records[0].data()
+                {
+                    prop_assert_eq!(a.0, Ipv4Addr::new(192, 0, 2, 10), "Should return specific IP, not wildcard");
+                }
+            }
+
+            #[test]
+            fn prop_soa_record_always_retrievable(serial in any::<u32>()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let zone = Zone::new(origin.clone(), soa);
+                let soa_record = zone.get_soa_record();
+
+                prop_assert_eq!(soa_record.name(), &origin);
+                prop_assert_eq!(soa_record.record_type(), RecordType::SOA);
+            }
+
+            #[test]
+            fn prop_record_ttl_preserved(name in arb_dns_name(), ttl in arb_ttl()) {
+                let origin = Name::from_str("example.com.").unwrap();
+                let soa = SoaRecord {
+                    mname: Name::from_str("ns1.example.com.").unwrap(),
+                    rname: Name::from_str("admin.example.com.").unwrap(),
+                    serial: 1,
+                    refresh: 7200,
+                    retry: 3600,
+                    expire: 1209600,
+                    minimum: 86400,
+                };
+
+                let mut zone = Zone::new(origin.clone(), soa);
+
+                let record = Record::from_rdata(
+                    name.clone(),
+                    ttl,
+                    RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+                );
+
+                zone.add_record(record.clone());
+
+                if let Some(records) = zone.lookup(&name, RecordType::A) {
+                    prop_assert_eq!(records[0].ttl(), ttl, "TTL should be preserved");
+                }
+            }
+        }
+    }
 }
