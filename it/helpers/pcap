@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# PCAP replay helpers for lrmdns integration tests
+
+# Replay PCAP file to server
+# Args: $1 = pcap file, $2 = port
+replay_pcap() {
+    local pcap="$1"
+    local port="${2:-$LRMDNS_PORT}"
+
+    # Use tcpreplay or scapy depending on what's available
+    if command -v tcpreplay &>/dev/null; then
+        tcpreplay --intf1=lo "$pcap"
+    elif command -v python3 &>/dev/null; then
+        python3 scripts/replay-pcap.py "$pcap" "$port"
+    else
+        echo "No PCAP replay tool available" >&2
+        return 1
+    fi
+}
+
+# Send raw DNS packet
+# Args: $1 = hex-encoded packet, $2 = port, $3 = protocol (udp|tcp)
+send_raw_packet() {
+    local packet_hex="$1"
+    local port="${2:-$LRMDNS_PORT}"
+    local protocol="${3:-udp}"
+
+    if [ "$protocol" = "udp" ]; then
+        echo -n "$packet_hex" | xxd -r -p | nc -u -w1 127.0.0.1 "$port"
+    else
+        # TCP needs 2-byte length prefix
+        local length=$(( ${#packet_hex} / 2 ))
+        printf '%04x' "$length" | xxd -r -p | cat - <(echo -n "$packet_hex" | xxd -r -p) | \
+            nc -w1 127.0.0.1 "$port"
+    fi
+}
+
+# Validate PCAP file structure
+validate_pcap() {
+    local pcap="$1"
+
+    if ! command -v tcpdump &>/dev/null; then
+        skip "tcpdump not available"
+    fi
+
+    tcpdump -r "$pcap" -n 2>&1 | grep -q "reading from file"
+}
