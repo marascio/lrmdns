@@ -133,26 +133,26 @@ async fn handle_udp_query(
     let start = Instant::now();
 
     // Check rate limiting
-    if let Some(ref limiter) = rate_limiter {
-        if !limiter.check_rate_limit(addr.ip()) {
-            metrics.record_rate_limited();
-            tracing::warn!("Rate limited query from {}", addr);
+    if let Some(ref limiter) = rate_limiter
+        && !limiter.check_rate_limit(addr.ip())
+    {
+        metrics.record_rate_limited();
+        tracing::warn!("Rate limited query from {}", addr);
 
-            // Send REFUSED response
-            let mut response = Message::new();
-            if data.len() >= 2 {
-                let id = u16::from_be_bytes([data[0], data[1]]);
-                response.set_id(id);
-            }
-            response.set_message_type(hickory_proto::op::MessageType::Response);
-            response.set_response_code(hickory_proto::op::ResponseCode::Refused);
-
-            let response_buf = response
-                .to_bytes()
-                .context("Failed to encode rate limit response")?;
-            socket.send_to(&response_buf, addr).await?;
-            return Ok(());
+        // Send REFUSED response
+        let mut response = Message::new();
+        if data.len() >= 2 {
+            let id = u16::from_be_bytes([data[0], data[1]]);
+            response.set_id(id);
         }
+        response.set_message_type(hickory_proto::op::MessageType::Response);
+        response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+
+        let response_buf = response
+            .to_bytes()
+            .context("Failed to encode rate limit response")?;
+        socket.send_to(&response_buf, addr).await?;
+        return Ok(());
     }
 
     // Parse the DNS query
@@ -301,29 +301,29 @@ async fn handle_tcp_connection(
         }
 
         // Check rate limiting
-        if let Some(ref limiter) = rate_limiter {
-            if !limiter.check_rate_limit(addr.ip()) {
-                metrics.record_rate_limited();
-                tracing::warn!("Rate limited TCP query from {}", addr);
+        if let Some(ref limiter) = rate_limiter
+            && !limiter.check_rate_limit(addr.ip())
+        {
+            metrics.record_rate_limited();
+            tracing::warn!("Rate limited TCP query from {}", addr);
 
-                // Send REFUSED response
-                let mut response = Message::new();
-                response.set_message_type(hickory_proto::op::MessageType::Response);
-                response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+            // Send REFUSED response
+            let mut response = Message::new();
+            response.set_message_type(hickory_proto::op::MessageType::Response);
+            response.set_response_code(hickory_proto::op::ResponseCode::Refused);
 
-                metrics.record_response(hickory_proto::op::ResponseCode::Refused);
+            metrics.record_response(hickory_proto::op::ResponseCode::Refused);
 
-                let response_buf = response
-                    .to_bytes()
-                    .context("Failed to encode rate limit response")?;
+            let response_buf = response
+                .to_bytes()
+                .context("Failed to encode rate limit response")?;
 
-                let len = (response_buf.len() as u16).to_be_bytes();
-                stream.write_all(&len).await?;
-                stream.write_all(&response_buf).await?;
+            let len = (response_buf.len() as u16).to_be_bytes();
+            stream.write_all(&len).await?;
+            stream.write_all(&response_buf).await?;
 
-                metrics.record_latency(start.elapsed());
-                return Ok(());
-            }
+            metrics.record_latency(start.elapsed());
+            return Ok(());
         }
 
         // Read the DNS message

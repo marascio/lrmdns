@@ -99,11 +99,11 @@ pub fn verify_ds(ds: &Record, dnskey: &Record) -> Result<()> {
     };
 
     // Compare computed digest with DS digest
-    if computed_digest.as_slice() != ds_data.digest().as_ref() {
+    if computed_digest.as_slice() != ds_data.digest() {
         return Err(anyhow!(
             "DS digest mismatch: computed={} expected={}",
             hex::encode(&computed_digest),
-            hex::encode(ds_data.digest().as_ref())
+            hex::encode(ds_data.digest())
         ));
     }
 
@@ -179,7 +179,7 @@ pub fn validate_nsec_denial(
 
         // Check if NSEC proves the type doesn't exist at this name
         if query_name == owner_name {
-            let type_exists = nsec_data.type_bit_maps().iter().any(|&t| t == query_type);
+            let type_exists = nsec_data.type_bit_maps().contains(&query_type);
 
             if !type_exists {
                 // Type doesn't exist at this name
@@ -232,10 +232,10 @@ pub fn find_related_dnssec_records(
     for record in records {
         if let Some(RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig))) =
             record.data()
+            && record.name() == name
+            && sig.type_covered() == rtype
         {
-            if record.name() == name && sig.type_covered() == rtype {
-                dnssec_records.push(record.clone());
-            }
+            dnssec_records.push(record.clone());
         }
     }
 

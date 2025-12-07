@@ -36,15 +36,15 @@ impl QueryProcessor {
 
         // Check for AXFR query (zone transfer)
         // AXFR must be handled specially by the TCP server
-        if let Some(question) = query.queries().first() {
-            if question.query_type() == RecordType::AXFR {
-                // AXFR queries must be over TCP
-                // We'll return the response with a special marker
-                // The TCP handler will detect this and stream the zone
-                response.add_query(question.clone());
-                response.set_authoritative(true);
-                return Ok(response);
-            }
+        if let Some(question) = query.queries().first()
+            && question.query_type() == RecordType::AXFR
+        {
+            // AXFR queries must be over TCP
+            // We'll return the response with a special marker
+            // The TCP handler will detect this and stream the zone
+            response.add_query(question.clone());
+            response.set_authoritative(true);
+            return Ok(response);
         }
 
         // Get the first question
@@ -113,18 +113,15 @@ impl QueryProcessor {
                 }
 
                 // If DNSSEC OK flag is set, include RRSIG records
-                if dnssec_ok {
-                    if let Some(rrsigs) = zone.lookup(qname, RecordType::SIG) {
-                        for rrsig in rrsigs {
-                            // Check if this RRSIG covers the queried record type
-                            if let Some(hickory_proto::rr::RData::DNSSEC(
-                                hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig),
-                            )) = rrsig.data()
-                            {
-                                if sig.type_covered() == qtype {
-                                    response.add_answer(rrsig.clone());
-                                }
-                            }
+                if dnssec_ok && let Some(rrsigs) = zone.lookup(qname, RecordType::SIG) {
+                    for rrsig in rrsigs {
+                        // Check if this RRSIG covers the queried record type
+                        if let Some(hickory_proto::rr::RData::DNSSEC(
+                            hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig),
+                        )) = rrsig.data()
+                            && sig.type_covered() == qtype
+                        {
+                            response.add_answer(rrsig.clone());
                         }
                     }
                 }
@@ -146,23 +143,23 @@ impl QueryProcessor {
                         response.add_answer(cname_record.clone());
 
                         // Chase the CNAME to find the target records
-                        if let Some(rdata) = cname_record.data() {
-                            if let hickory_proto::rr::RData::CNAME(cname) = rdata {
-                                let target = cname.0.clone();
+                        if let Some(rdata) = cname_record.data()
+                            && let hickory_proto::rr::RData::CNAME(cname) = rdata
+                        {
+                            let target = cname.0.clone();
 
-                                // Try to find the target record of the requested type
-                                if let Some(target_records) = zone.lookup(&target, qtype) {
-                                    for target_record in target_records {
-                                        response.add_answer(target_record.clone());
-                                    }
-                                    tracing::debug!(
-                                        "CNAME {} -> {}, found {} {:?} records",
-                                        qname,
-                                        target,
-                                        target_records.len(),
-                                        qtype
-                                    );
+                            // Try to find the target record of the requested type
+                            if let Some(target_records) = zone.lookup(&target, qtype) {
+                                for target_record in target_records {
+                                    response.add_answer(target_record.clone());
                                 }
+                                tracing::debug!(
+                                    "CNAME {} -> {}, found {} {:?} records",
+                                    qname,
+                                    target,
+                                    target_records.len(),
+                                    qtype
+                                );
                             }
                         }
                     }
@@ -188,11 +185,12 @@ impl QueryProcessor {
         }
 
         // Add NS records in authority section for positive responses
-        if response.response_code() == ResponseCode::NoError && !response.answers().is_empty() {
-            if let Some(ns_records) = zone.lookup(&zone.origin, RecordType::NS) {
-                for record in ns_records {
-                    response.add_name_server(record.clone());
-                }
+        if response.response_code() == ResponseCode::NoError
+            && !response.answers().is_empty()
+            && let Some(ns_records) = zone.lookup(&zone.origin, RecordType::NS)
+        {
+            for record in ns_records {
+                response.add_name_server(record.clone());
             }
         }
 
