@@ -25,6 +25,12 @@ lrmdns is an authoritative DNS server that responds to queries for domains it ma
 - **EDNS0 support** - handles larger UDP responses (up to 4096 bytes)
 - **Enhanced response completeness** - proper authority and additional sections
 
+### Phase 5 (DNSSEC) - ✅ Complete
+- **DNSSEC record types**: DNSKEY, RRSIG, NSEC, DS
+- **EDNS0 DNSSEC OK (DO) flag** - proper DNSSEC-aware responses
+- **Offline signing support** - serve pre-signed zones
+- **Zone file parsing** for DNSSEC records with base64/hex encoding
+
 ## Installation
 
 ### Prerequisites
@@ -129,10 +135,11 @@ dig @127.0.0.1 -p 5353 nonexistent.example.com A
 lrmdns supports standard RFC 1035 zone file format:
 
 - **Directives**: `$ORIGIN`, `$TTL`
-- **Record types**: SOA, NS, A, AAAA
+- **Record types**: SOA, NS, A, AAAA, CNAME, MX, TXT, PTR, SRV, CAA, DNSKEY, RRSIG, NSEC, DS
 - **Comments**: Lines starting with `;`
 - **@ symbol**: Represents the zone origin
 - **Relative names**: Automatically appended with zone origin
+- **Wildcards**: `*` for wildcard matching
 
 ### Required Records
 
@@ -176,15 +183,62 @@ Expected performance:
 - **Concurrency**: Handles multiple concurrent connections via tokio
 - **Protocol**: UDP for speed, TCP for reliability and larger responses
 
+## DNSSEC Support
+
+lrmdns supports **offline DNSSEC signing** - it can serve pre-signed zones that have been signed using external tools.
+
+### Supported DNSSEC Record Types
+
+- **DNSKEY**: Public key distribution
+- **RRSIG**: Resource record signatures
+- **NSEC**: Authenticated denial of existence
+- **DS**: Delegation signer records
+
+### Zone File Format
+
+DNSSEC records use standard zone file format with base64 and hex encoding:
+
+```
+; DNSKEY: flags protocol algorithm public_key_base64
+@ IN DNSKEY 256 3 8 AwEAAaetidLzsKWUt4swWR8yu0wPHPiUi8LU...
+
+; RRSIG: type_covered algorithm labels original_ttl sig_expiration sig_inception key_tag signer signature_base64
+@ IN RRSIG A 8 2 3600 1767139200 1764547200 12345 example.com. AwEAAaetidLzsKWU...
+
+; NSEC: next_domain_name type_bit_maps...
+@ IN NSEC www.example.com. A NS SOA RRSIG NSEC DNSKEY
+
+; DS: key_tag algorithm digest_type digest_hex
+@ IN DS 12345 8 2 A8B1C2D3E4F506172839405A6B7C8D9E0F1A2B3C4D5E6F70
+```
+
+### Testing DNSSEC Queries
+
+Query DNSSEC records with dig using the `+dnssec` flag:
+
+```bash
+# Query with DNSSEC OK flag set
+dig @127.0.0.1 -p 5353 +dnssec example.com DNSKEY
+
+# Query for RRSIG records
+dig @127.0.0.1 -p 5353 example.com RRSIG
+```
+
+### Signing Your Zones
+
+lrmdns does NOT perform online signing. You must sign zones offline using tools like:
+- **ldns-signzone** (from ldns)
+- **dnssec-signzone** (from BIND)
+
+Once signed, point your zone configuration to the signed zone file.
+
 ## Current Limitations
 
-- **No zone transfers** (AXFR) - Planned for Phase 4
+- **No online DNSSEC signing** - zones must be pre-signed offline
+- **No NSEC3** support - only NSEC for authenticated denial
 - **No dynamic updates** (RFC 2136)
-- **No DNSSEC** - Planned for Phase 5
 - **No zone reloading** without restart - Planned for Phase 3
-- **No wildcards** (*.example.com) - Planned for Phase 4
 - **No rate limiting** - Planned for Phase 3
-- **Limited record types**: A, AAAA, NS, SOA, CNAME, MX, TXT (more in Phase 4: PTR, SRV, CAA)
 
 See `plan.md` for the full implementation roadmap.
 
@@ -192,9 +246,9 @@ See `plan.md` for the full implementation roadmap.
 
 - **Phase 1** (MVP): ✅ Complete - Basic authoritative DNS with UDP
 - **Phase 2** (Core): ✅ Complete - TCP, CNAME, MX, TXT, EDNS0
-- **Phase 3** (Production): Zone reloading, metrics, rate limiting, privilege management
-- **Phase 4** (Advanced): Wildcards, AXFR, PTR/SRV/CAA records, management API
-- **Phase 5** (Future): DNSSEC
+- **Phase 3** (Production): ✅ Complete - Zone reloading, metrics, rate limiting, privilege management
+- **Phase 4** (Advanced): ✅ Complete - Wildcards, AXFR, PTR/SRV/CAA records, management API
+- **Phase 5** (DNSSEC): ✅ Complete - Offline DNSSEC support with DNSKEY, RRSIG, NSEC, DS
 
 ## Contributing
 
