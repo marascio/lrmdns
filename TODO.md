@@ -8,7 +8,7 @@ No known bugs at this time.
 
 - [ ] Add benchmarking suite (compare against BIND, Knot, etc.)
 - [ ] Implement query caching for frequently requested records
-- [ ] Add connection pooling/reuse for TCP queries
+- [x] Add connection pooling/reuse for TCP queries
 - [ ] Profile and optimize hot paths in query processing
 
 ## Features
