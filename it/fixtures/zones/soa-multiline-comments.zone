@@ -1,0 +1,20 @@
+$ORIGIN test2.example.
+$TTL 3600
+
+; Multi-line SOA with detailed comments (BIND standard style)
+@ IN SOA ns1.test2.example. admin.test2.example. (
+    2024120602  ; Serial - YYYYMMDDNN format
+    7200        ; Refresh - 2 hours
+    3600        ; Retry - 1 hour
+    1209600     ; Expire - 2 weeks
+    86400       ; Minimum TTL - 1 day
+)
+
+@ IN NS ns1.test2.example.
+@ IN NS ns2.test2.example.
+
+ns1 IN A 192.0.2.61
+ns2 IN A 192.0.2.62
+
+mail IN A 192.0.2.70
+@ IN MX 10 mail.test2.example.

@@ -1,0 +1,15 @@
+$ORIGIN test5.example.
+$TTL	3600
+
+; Multi-line SOA with tabs and mixed whitespace
+@	IN	SOA	ns1.test5.example.	postmaster.test5.example.	(
+		2024120605		; Serial
+        14400           ; Refresh (spaces)
+	7200		; Retry (tabs)
+    1209600     ; Expire (spaces)
+		86400		; Minimum (tabs)
+)
+
+@	IN	NS	ns1.test5.example.
+
+ns1	IN	A	192.0.2.91

@@ -1,0 +1,18 @@
+$ORIGIN test4.example.
+$TTL 3600
+
+; Multi-line SOA with mixed grouping
+@ IN SOA ns1.test4.example. dns-admin.test4.example. (
+    2024120604 10800  ; Serial and Refresh on same line
+    3600              ; Retry
+    604800 86400      ; Expire and Minimum on same line
+)
+
+@ IN NS ns1.test4.example.
+@ IN NS ns2.test4.example.
+
+ns1 IN A 192.0.2.81
+ns2 IN A 192.0.2.82
+
+ftp IN CNAME www.test4.example.
+www IN A 192.0.2.90
