@@ -631,6 +631,104 @@ fn parse_resource_record(
                 ),
             ))
         }
+        "NAPTR" => {
+            if parts.len() < idx + 6 {
+                return Ok(None);
+            }
+            let order = parts[idx]
+                .parse::<u16>()
+                .context(format!("Invalid NAPTR order on line {}", line_num + 1))?;
+            let preference = parts[idx + 1]
+                .parse::<u16>()
+                .context(format!("Invalid NAPTR preference on line {}", line_num + 1))?;
+            let flags = parts[idx + 2]
+                .trim_matches('"')
+                .as_bytes()
+                .to_vec()
+                .into_boxed_slice();
+            let services = parts[idx + 3]
+                .trim_matches('"')
+                .as_bytes()
+                .to_vec()
+                .into_boxed_slice();
+            let regexp = parts[idx + 4]
+                .trim_matches('"')
+                .as_bytes()
+                .to_vec()
+                .into_boxed_slice();
+            let replacement = parse_domain_name(parts[idx + 5], origin).context(format!(
+                "Invalid NAPTR replacement on line {}",
+                line_num + 1
+            ))?;
+
+            RData::NAPTR(hickory_proto::rr::rdata::NAPTR::new(
+                order,
+                preference,
+                flags,
+                services,
+                regexp,
+                replacement,
+            ))
+        }
+        "TLSA" => {
+            if parts.len() < idx + 4 {
+                return Ok(None);
+            }
+            let cert_usage = parts[idx]
+                .parse::<u8>()
+                .context(format!("Invalid TLSA usage on line {}", line_num + 1))?;
+            let selector = parts[idx + 1]
+                .parse::<u8>()
+                .context(format!("Invalid TLSA selector on line {}", line_num + 1))?;
+            let matching_type = parts[idx + 2].parse::<u8>().context(format!(
+                "Invalid TLSA matching_type on line {}",
+                line_num + 1
+            ))?;
+
+            // Certificate data is hex encoded, join remaining parts
+            let cert_hex = parts[idx + 3..].join("");
+            let cert_data = match hex::decode(&cert_hex) {
+                Ok(d) => d,
+                Err(_) => {
+                    tracing::warn!("Invalid hex in TLSA on line {}", line_num + 1);
+                    return Ok(None);
+                }
+            };
+
+            RData::TLSA(hickory_proto::rr::rdata::TLSA::new(
+                cert_usage.into(),
+                selector.into(),
+                matching_type.into(),
+                cert_data,
+            ))
+        }
+        "SSHFP" => {
+            if parts.len() < idx + 3 {
+                return Ok(None);
+            }
+            let algorithm = parts[idx]
+                .parse::<u8>()
+                .context(format!("Invalid SSHFP algorithm on line {}", line_num + 1))?;
+            let fp_type = parts[idx + 1]
+                .parse::<u8>()
+                .context(format!("Invalid SSHFP fp_type on line {}", line_num + 1))?;
+
+            // Fingerprint is hex encoded
+            let fp_hex = parts[idx + 2..].join("");
+            let fingerprint = match hex::decode(&fp_hex) {
+                Ok(fp) => fp,
+                Err(_) => {
+                    tracing::warn!("Invalid hex in SSHFP on line {}", line_num + 1);
+                    return Ok(None);
+                }
+            };
+
+            RData::SSHFP(hickory_proto::rr::rdata::SSHFP::new(
+                algorithm.into(),
+                fp_type.into(),
+                fingerprint,
+            ))
+        }
         _ => {
             tracing::warn!("Unsupported record type {} on line {}", rtype, line_num + 1);
             return Ok(None);
@@ -1585,5 +1683,88 @@ $TTL 3600
         let mx_records = zone.lookup(&Name::from_str("example.com.").unwrap(), RecordType::MX);
         assert!(mx_records.is_some());
         assert_eq!(mx_records.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_naptr_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
+        writeln!(
+            temp_file,
+            "_sip._tcp IN NAPTR 100 10 \"u\" \"E2U+sip\" \"!^.*$!sip:info@example.com!\" ."
+        )
+        .unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let naptr_records = zone.lookup(
+            &Name::from_str("_sip._tcp.example.com.").unwrap(),
+            RecordType::NAPTR,
+        );
+        assert!(naptr_records.is_some());
+        assert_eq!(naptr_records.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_tlsa_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
+        writeln!(temp_file, "_443._tcp IN TLSA 3 1 1 D2ABDE240D7CD3EE6B4B28C54DF034B97983A1D16E8A410E4561CB106618E971").unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let tlsa_records = zone.lookup(
+            &Name::from_str("_443._tcp.example.com.").unwrap(),
+            RecordType::TLSA,
+        );
+        assert!(tlsa_records.is_some());
+        assert_eq!(tlsa_records.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_sshfp_record_parsing() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "$ORIGIN example.com.").unwrap();
+        writeln!(temp_file, "$TTL 3600").unwrap();
+        writeln!(
+            temp_file,
+            "@ IN SOA ns1.example.com. admin.example.com. 1 7200 3600 1209600 86400"
+        )
+        .unwrap();
+        writeln!(
+            temp_file,
+            "host IN SSHFP 1 2 123456789ABCDEF67890123456789ABCDEF67890123456789ABCDEF6789012"
+        )
+        .unwrap();
+        temp_file.flush().unwrap();
+
+        let zone = parse_zone_file(temp_file.path(), "example.com.").unwrap();
+        let sshfp_records = zone.lookup(
+            &Name::from_str("host.example.com.").unwrap(),
+            RecordType::SSHFP,
+        );
+        assert!(sshfp_records.is_some());
+        assert_eq!(sshfp_records.unwrap().len(), 1);
     }
 }
