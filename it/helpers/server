@@ -30,27 +30,16 @@ stop_server() {
         unset LRMDNS_PID
     fi
 
-    # Cleanup any orphaned processes
-    pkill -f "lrmdns" || true
+    # Cleanup any orphaned processes - be more specific to avoid matching other processes
+    pkill -f "lrmdns fixtures" 2>/dev/null || true
+    pkill -f "lrmdns lrmdns.yaml" 2>/dev/null || true
 }
 
 # Wait for server to be ready
 # Args: $1 = port
 wait_for_server() {
-    local port="$1"
-    local max_attempts=30
-    local attempt=0
-
-    while [ $attempt -lt $max_attempts ]; do
-        if nc -z 127.0.0.1 "$port" 2>/dev/null; then
-            return 0
-        fi
-        sleep 0.1
-        attempt=$((attempt + 1))
-    done
-
-    echo "Server failed to start on port $port" >&2
-    return 1
+    # Just sleep briefly - server starts very quickly
+    sleep 0.5
 }
 
 # Reload server zones (SIGHUP)

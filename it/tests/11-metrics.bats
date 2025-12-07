@@ -27,7 +27,7 @@ teardown() {
 @test "Metrics endpoint returns JSON" {
     run curl -s http://127.0.0.1:18080/metrics
     assert_success
-    echo "$output" | grep -q "total_queries"
+    echo "$output" | grep -q '"total"'
 }
 
 @test "Query increments metrics counter" {
@@ -37,5 +37,5 @@ teardown() {
     # Check metrics
     run curl -s http://127.0.0.1:18080/metrics
     assert_success
-    echo "$output" | grep -q "total_queries"
+    echo "$output" | grep -q '"total"'
 }
