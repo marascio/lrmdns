@@ -47,10 +47,6 @@ teardown() {
 }
 
 @test "SSHFP record query for host" {
-    # Skip on Linux - hickory-proto SSHFP serialization produces FORMERR on some dig versions
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        skip "SSHFP tests skipped on Linux due to hickory-proto serialization issue"
-    fi
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     assert [ -n "$result" ]
     # Should have at least one SSHFP record (algorithm 1, hash type 2)
@@ -58,23 +54,15 @@ teardown() {
 }
 
 @test "SSHFP record for Ed25519 key" {
-    # Skip on Linux - hickory-proto SSHFP serialization produces FORMERR on some dig versions
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        skip "SSHFP tests skipped on Linux due to hickory-proto serialization issue"
-    fi
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     # Should contain Ed25519 (algorithm 4) record
     echo "$result" | grep -q "SSHFP.*4 2"
 }
 
 @test "SSHFP record contains fingerprint" {
-    # Skip on Linux - hickory-proto SSHFP serialization produces FORMERR on some dig versions
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        skip "SSHFP tests skipped on Linux due to hickory-proto serialization issue"
-    fi
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     # Should contain hex fingerprint
-    echo "$result" | grep -qi "123456789ABCDEF"
+    echo "$result" | grep -qi "123456789ABCDEF0"
 }
 
 @test "Query for unsupported record type returns empty" {
@@ -96,10 +84,6 @@ teardown() {
 }
 
 @test "SSHFP query over TCP" {
-    # Skip on Linux - hickory-proto SSHFP serialization produces FORMERR on some dig versions
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        skip "SSHFP tests skipped on Linux due to hickory-proto serialization issue"
-    fi
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" +tcp server.example.com. SSHFP)
     assert [ -n "$result" ]
     echo "$result" | grep -q "SSHFP.*1 2"
