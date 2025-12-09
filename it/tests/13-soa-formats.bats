@@ -18,7 +18,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test.example.
-    file: $(pwd)/fixtures/zones/soa-single-line.zone
+    file: fixtures/zones/soa-single-line.zone
 EOF
 
     start_server "$config" "$port"
@@ -46,7 +46,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test2.example.
-    file: $(pwd)/fixtures/zones/soa-multiline-comments.zone
+    file: fixtures/zones/soa-multiline-comments.zone
 EOF
 
     start_server "$config" "$port"
@@ -77,7 +77,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test3.example.
-    file: $(pwd)/fixtures/zones/soa-multiline-compact.zone
+    file: fixtures/zones/soa-multiline-compact.zone
 EOF
 
     start_server "$config" "$port"
@@ -105,7 +105,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test4.example.
-    file: $(pwd)/fixtures/zones/soa-multiline-mixed.zone
+    file: fixtures/zones/soa-multiline-mixed.zone
 EOF
 
     start_server "$config" "$port"
@@ -134,7 +134,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test5.example.
-    file: $(pwd)/fixtures/zones/soa-tabs-and-spaces.zone
+    file: fixtures/zones/soa-tabs-and-spaces.zone
 EOF
 
     start_server "$config" "$port"
@@ -163,7 +163,7 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: example.com.
-    file: $(pwd)/fixtures/zones/basic.zone
+    file: fixtures/zones/basic.zone
 EOF
 
     start_server "$config" "$port"
@@ -190,11 +190,11 @@ server:
   listen: "127.0.0.1:${port}"
 zones:
   - name: test.example.
-    file: $(pwd)/fixtures/zones/soa-single-line.zone
+    file: fixtures/zones/soa-single-line.zone
   - name: test2.example.
-    file: $(pwd)/fixtures/zones/soa-multiline-comments.zone
+    file: fixtures/zones/soa-multiline-comments.zone
   - name: test3.example.
-    file: $(pwd)/fixtures/zones/soa-multiline-compact.zone
+    file: fixtures/zones/soa-multiline-compact.zone
 EOF
 
     start_server "$config" "$port"
