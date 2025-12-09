@@ -2,7 +2,12 @@
 
 ## Bugs
 
-No known bugs at this time.
+- [ ] SSHFP record serialization produces FORMERR on Linux (hickory-proto issue)
+  - Server correctly parses and stores SSHFP records
+  - Serialization to wire format triggers FORMERR in dig on Ubuntu
+  - Works correctly on macOS
+  - SSHFP tests currently skipped on Linux in CI
+  - Likely an issue with hickory-proto's SSHFP RData implementation
 
 ## Performance & Scalability
 
