@@ -5,7 +5,7 @@ load '../helpers/dns'
 load '../bats/test_helper/bats-support/load'
 load '../bats/test_helper/bats-assert/load'
 
-# Tests for SIGHUP zone reloading
+# Tests for zone reloading via SIGHUP signal (Unix only)
 
 setup() {
     # Create unique test files for this test
@@ -64,7 +64,11 @@ teardown() {
     rm -f "$TEST_ZONE" "$TEST_CONFIG"
 }
 
-@test "Zone reload - modify existing A record" {
+@test "Zone reload via SIGHUP - modify existing A record" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Query initial value
     result=$(query_a "www.example.com.")
     assert_equal "$result" "192.0.2.10"
@@ -80,7 +84,11 @@ teardown() {
     assert_equal "$result" "192.0.2.99"
 }
 
-@test "Zone reload - add new A record" {
+@test "Zone reload via SIGHUP - add new A record" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Query non-existent record (should be NXDOMAIN)
     local rcode=$(get_rcode "new.example.com." A)
     assert_equal "$rcode" "NXDOMAIN"
@@ -96,7 +104,11 @@ teardown() {
     assert_equal "$result" "192.0.2.30"
 }
 
-@test "Zone reload - delete A record" {
+@test "Zone reload via SIGHUP - delete A record" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Query should succeed initially
     result=$(query_a "mail.example.com.")
     assert_equal "$result" "192.0.2.20"
@@ -112,7 +124,11 @@ teardown() {
     assert_equal "$rcode" "NXDOMAIN"
 }
 
-@test "Zone reload - update SOA serial" {
+@test "Zone reload via SIGHUP - update SOA serial" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Query initial SOA
     run dig @127.0.0.1 -p "$LRMDNS_PORT" example.com. SOA +short
     assert_success
@@ -130,7 +146,11 @@ teardown() {
     assert_output --partial "2024010102"
 }
 
-@test "Zone reload - add multiple record types" {
+@test "Zone reload via SIGHUP - add multiple record types" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Add MX, TXT, and CNAME records
     cat >> "$TEST_ZONE" <<'EOF'
 @ IN MX 10 mail.example.com.
@@ -156,7 +176,11 @@ EOF
     assert_equal "$result" "192.0.2.10"
 }
 
-@test "Zone reload - invalid zone file preserves old zone" {
+@test "Zone reload via SIGHUP - invalid zone file preserves old zone" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Initial query should work
     result=$(query_a "www.example.com.")
     assert_equal "$result" "192.0.2.10"
@@ -176,7 +200,11 @@ EOF
     kill -0 "$LRMDNS_PID"
 }
 
-@test "Zone reload - multiple reloads in succession" {
+@test "Zone reload via SIGHUP - multiple reloads in succession" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # First reload - change to 192.0.2.50
     sed -i.bak 's/www IN A 192.0.2.10/www IN A 192.0.2.50/' "$TEST_ZONE"
     reload_server
@@ -196,7 +224,11 @@ EOF
     assert_equal "$result" "192.0.2.70"
 }
 
-@test "Zone reload - change multiple zones" {
+@test "Zone reload via SIGHUP - change multiple zones" {
+    if is_windows; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Create second zone
     local zone2="/tmp/lrmdns-reload-test2-${BATS_TEST_NUMBER}.zone"
     cat > "$zone2" <<'EOF'

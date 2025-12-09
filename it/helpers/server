@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Server lifecycle management for lrmdns integration tests
 
+# Check if running on Windows (Git Bash, Cygwin, WSL, etc.)
+is_windows() {
+    [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]
+}
+
 # Get a unique port for this test (based on BATS test number or process ID)
 # This allows parallel test execution without port conflicts
 get_unique_port() {
@@ -83,7 +88,13 @@ wait_for_server() {
 }
 
 # Reload server zones (SIGHUP)
+# Note: Only works on Unix systems. Windows does not support SIGHUP.
 reload_server() {
+    if is_windows; then
+        echo "WARNING: reload_server() is not supported on Windows (requires SIGHUP)" >&2
+        return 1
+    fi
+
     if [ -n "$LRMDNS_PID" ]; then
         kill -HUP "$LRMDNS_PID"
         sleep 0.5  # Give server time to reload
@@ -91,7 +102,13 @@ reload_server() {
 }
 
 # Get server metrics (SIGUSR1)
+# Note: Only works on Unix systems. Windows does not support SIGUSR1.
 dump_metrics() {
+    if is_windows; then
+        echo "WARNING: dump_metrics() is not supported on Windows (requires SIGUSR1)" >&2
+        return 1
+    fi
+
     if [ -n "$LRMDNS_PID" ]; then
         kill -USR1 "$LRMDNS_PID"
         sleep 0.1
