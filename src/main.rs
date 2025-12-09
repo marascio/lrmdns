@@ -139,45 +139,46 @@ fn load_zones(config: &Config) -> Result<ZoneStore> {
     Ok(zone_store)
 }
 
+#[cfg(unix)]
 async fn handle_signals(config: Config, zone_store: Arc<RwLock<ZoneStore>>, metrics: Arc<Metrics>) {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut sighup = signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
+    let mut sigusr1 =
+        signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
+
     loop {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-
-            let mut sighup =
-                signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
-            let mut sigusr1 =
-                signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
-
-            tokio::select! {
-                _ = sighup.recv() => {
-                    tracing::info!("Received SIGHUP, reloading zones...");
-                    match load_zones(&config) {
-                        Ok(new_store) => {
-                            let mut store = zone_store.write().await;
-                            *store = new_store;
-                            tracing::info!("Zones reloaded successfully");
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to reload zones: {}", e);
-                        }
+        tokio::select! {
+            _ = sighup.recv() => {
+                tracing::info!("Received SIGHUP, reloading zones...");
+                match load_zones(&config) {
+                    Ok(new_store) => {
+                        let mut store = zone_store.write().await;
+                        *store = new_store;
+                        tracing::info!("Zones reloaded successfully");
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to reload zones: {}", e);
                     }
                 }
-                _ = sigusr1.recv() => {
-                    tracing::info!("Received SIGUSR1, logging metrics...");
-                    metrics.log_summary();
-                }
+            }
+            _ = sigusr1.recv() => {
+                tracing::info!("Received SIGUSR1, logging metrics...");
+                metrics.log_summary();
             }
         }
-
-        #[cfg(not(unix))]
-        {
-            // On non-Unix platforms, just wait for Ctrl+C
-            tokio::signal::ctrl_c().await.ok();
-            tracing::info!("Shutting down...");
-            metrics.log_summary();
-            std::process::exit(0);
-        }
     }
+}
+
+#[cfg(not(unix))]
+async fn handle_signals(
+    _config: Config,
+    _zone_store: Arc<RwLock<ZoneStore>>,
+    metrics: Arc<Metrics>,
+) {
+    // On non-Unix platforms, just wait for Ctrl+C
+    tokio::signal::ctrl_c().await.ok();
+    tracing::info!("Shutting down...");
+    metrics.log_summary();
+    std::process::exit(0);
 }
