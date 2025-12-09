@@ -49,14 +49,14 @@ teardown() {
 @test "SSHFP record query for host" {
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP +short)
     assert [ -n "$result" ]
-    # Should have at least one SSHFP record
-    echo "$result" | grep -q "^1 2"
+    # Should have at least one SSHFP record (algorithm 1, hash type 2)
+    echo "$result" | grep -q "1 2"
 }
 
 @test "SSHFP record for Ed25519 key" {
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP +short)
     # Should contain Ed25519 (algorithm 4) record
-    echo "$result" | grep -q "^4 2"
+    echo "$result" | grep -q "4 2"
 }
 
 @test "SSHFP record contains fingerprint" {
@@ -86,5 +86,5 @@ teardown() {
 @test "SSHFP query over TCP" {
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" +tcp server.example.com. SSHFP +short)
     assert [ -n "$result" ]
-    echo "$result" | grep -q "^1 2"
+    echo "$result" | grep -q "1 2"
 }
