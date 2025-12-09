@@ -47,20 +47,22 @@ teardown() {
 }
 
 @test "SSHFP record query for host" {
-    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP +short)
+    # Use full output instead of +short to handle different dig versions
+    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     assert [ -n "$result" ]
     # Should have at least one SSHFP record (algorithm 1, hash type 2)
-    echo "$result" | grep -q "1 2"
+    # Match in answer section with algorithm 1, fingerprint type 2
+    echo "$result" | grep -q "SSHFP.*1 2"
 }
 
 @test "SSHFP record for Ed25519 key" {
-    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP +short)
+    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     # Should contain Ed25519 (algorithm 4) record
-    echo "$result" | grep -q "4 2"
+    echo "$result" | grep -q "SSHFP.*4 2"
 }
 
 @test "SSHFP record contains fingerprint" {
-    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP +short)
+    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     # Should contain hex fingerprint
     echo "$result" | grep -qi "123456789ABCDEF"
 }
@@ -84,7 +86,7 @@ teardown() {
 }
 
 @test "SSHFP query over TCP" {
-    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" +tcp server.example.com. SSHFP +short)
+    result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" +tcp server.example.com. SSHFP)
     assert [ -n "$result" ]
-    echo "$result" | grep -q "1 2"
+    echo "$result" | grep -q "SSHFP.*1 2"
 }
