@@ -136,18 +136,22 @@ This document outlines the steps needed to prepare lrmdns for public GitHub publ
 
 ---
 
-## Phase 6: Publication
+## Phase 6: Publication - Ready for Manual Steps
 
 **Goal:** Push to GitHub and set up repository
 
-### Tasks:
+### Automated Preparation (Complete):
+- [x] Git tag v0.1.0 created locally with release notes
+- [x] Created GITHUB_PUBLICATION_STEPS.md with detailed instructions
+
+### Manual Steps Required (Follow GITHUB_PUBLICATION_STEPS.md):
 - [ ] Create repository on GitHub: `marascio/lrmdns`
   - Make it public
   - Don't initialize with README (we have one)
 - [ ] Add remote and push
   ```bash
   git remote add origin https://github.com/marascio/lrmdns.git
-  git push -u origin master
+  git push -u origin master --tags
   ```
 - [ ] Configure repository settings on GitHub:
   - Add description: "Lightweight authoritative-only DNS server written in Rust with DNSSEC support"
@@ -158,14 +162,13 @@ This document outlines the steps needed to prepare lrmdns for public GitHub publ
     - Require PR reviews
     - Require status checks (CI) to pass
 - [ ] Create initial release v0.1.0
-  - Tag: `v0.1.0`
+  - Tag: `v0.1.0` (already created locally)
   - Title: "lrmdns v0.1.0 - Initial Release"
-  - Body: Copy from CHANGELOG.md
-  - Attach binary builds (optional)
+  - Body: Copy from GITHUB_PUBLICATION_STEPS.md or CHANGELOG.md
 - [ ] Verify CI runs successfully on GitHub Actions
 - [ ] Add GitHub repository social preview image (optional)
 
-**Estimated Time:** 15 minutes
+**Status:** Ready to publish - see GITHUB_PUBLICATION_STEPS.md for step-by-step instructions
 
 ---
 
@@ -219,7 +222,7 @@ This document outlines the steps needed to prepare lrmdns for public GitHub publ
 - ✅ Phase 3: Complete - GitHub community files and CI/CD
 - ✅ Phase 4: Complete - SECURITY.md enhancement
 - ✅ Phase 5: Complete - Final quality checks
-- ⏳ Phase 6: Not started - Publish to GitHub
+- 🔄 Phase 6: Ready for manual steps - Publish to GitHub (see GITHUB_PUBLICATION_STEPS.md)
 - ⏳ Phase 7: Not started - Post-publication polish
 
 ---
