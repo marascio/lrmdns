@@ -17,8 +17,9 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 **Do NOT create a public GitHub issue for security vulnerabilities.**
 
 Instead, please report security issues via:
-- Email: (Add your security contact email here)
-- GitHub Security Advisories: https://github.com/marascio/lrmdns/security/advisories/new
+- **GitHub Security Advisories** (preferred): https://github.com/marascio/lrmdns/security/advisories/new
+  - This allows for private disclosure and coordinated response
+  - GitHub will notify the maintainers automatically
 
 ### What to Include
 
