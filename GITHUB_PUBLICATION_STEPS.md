@@ -27,14 +27,14 @@ Run these commands from your local repository:
 # Add GitHub as the origin remote
 git remote add origin https://github.com/marascio/lrmdns.git
 
-# Push master branch and all tags
-git push -u origin master --tags
+# Push main branch and all tags
+git push -u origin main --tags
 ```
 
 This will:
 - Push all commits to GitHub
 - Push the v0.1.0 tag
-- Set up master to track origin/master
+- Set up main to track origin/main
 
 ## Step 3: Configure Repository Settings
 
@@ -57,7 +57,7 @@ Go to repository settings on GitHub:
 
 ### 3.4 Branch Protection (Optional but Recommended)
 - Navigate to: Settings → Branches
-- Add rule for `master` branch:
+- Add rule for `main` branch:
   - ✅ Require pull request reviews before merging
   - ✅ Require status checks to pass before merging
     - Select: `Test (ubuntu-latest, stable)`, `Test (macos-latest, stable)`
@@ -100,7 +100,7 @@ cd lrmdns
 cargo build --release
 ```
 
-See [README.md](https://github.com/marascio/lrmdns/blob/master/README.md) for full documentation and [CHANGELOG.md](https://github.com/marascio/lrmdns/blob/master/CHANGELOG.md) for complete release notes.
+See [README.md](https://github.com/marascio/lrmdns/blob/main/README.md) for full documentation and [CHANGELOG.md](https://github.com/marascio/lrmdns/blob/main/CHANGELOG.md) for complete release notes.
 ```
 
 5. Check "Set as the latest release"
@@ -143,7 +143,7 @@ After successful publication, consider:
 ```bash
 # You may need to use SSH instead of HTTPS
 git remote set-url origin git@github.com:marascio/lrmdns.git
-git push -u origin master --tags
+git push -u origin main --tags
 ```
 
 **If CI fails:**

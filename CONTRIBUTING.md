@@ -62,7 +62,7 @@ This project follows a simple code of conduct: be respectful, constructive, and 
 
 ### Always Work in Branches
 
-**NEVER commit directly to master.** Always create a feature branch:
+**NEVER commit directly to main.** Always create a feature branch:
 
 ```bash
 git checkout -b feat/your-feature-name
@@ -94,9 +94,9 @@ Branch naming conventions:
 
 ```bash
 git fetch upstream
-git checkout master
-git merge upstream/master
-git push origin master
+git checkout main
+git merge upstream/main
+git push origin main
 ```
 
 ## Testing
@@ -271,7 +271,7 @@ Co-Authored-By: Your Name <your.email@example.com>
 1. Ensure all tests pass
 2. Update documentation (README, code comments, etc.)
 3. Update CHANGELOG.md if applicable
-4. Rebase on latest master if needed
+4. Rebase on latest main if needed
 5. Ensure your branch has a clear, descriptive name
 
 ### Creating a Pull Request
@@ -296,18 +296,18 @@ Co-Authored-By: Your Name <your.email@example.com>
 
 - At least one maintainer must approve
 - All CI checks must pass
-- No merge conflicts with master
+- No merge conflicts with main
 - Code follows project style guidelines
 - Tests adequately cover the changes
 
 ### After Your PR is Merged
 
 - Delete your feature branch (both locally and on GitHub)
-- Update your local master:
+- Update your local main:
   ```bash
-  git checkout master
-  git pull upstream master
-  git push origin master
+  git checkout main
+  git pull upstream main
+  git push origin main
   ```
 
 ## Reporting Bugs

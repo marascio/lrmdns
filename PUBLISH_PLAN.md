@@ -151,7 +151,7 @@ This document outlines the steps needed to prepare lrmdns for public GitHub publ
 - [ ] Add remote and push
   ```bash
   git remote add origin https://github.com/marascio/lrmdns.git
-  git push -u origin master --tags
+  git push -u origin main --tags
   ```
 - [ ] Configure repository settings on GitHub:
   - Add description: "Lightweight authoritative-only DNS server written in Rust with DNSSEC support"
