@@ -50,6 +50,9 @@ teardown() {
     # Use full output instead of +short to handle different dig versions
     result=$(dig @127.0.0.1 -p "$LRMDNS_PORT" server.example.com. SSHFP)
     assert [ -n "$result" ]
+    # Debug: print the result to see what we're getting
+    echo "# DEBUG: dig output:" >&3
+    echo "$result" >&3
     # Should have at least one SSHFP record (algorithm 1, hash type 2)
     # Match in answer section with algorithm 1, fingerprint type 2
     echo "$result" | grep -q "SSHFP.*1 2"
