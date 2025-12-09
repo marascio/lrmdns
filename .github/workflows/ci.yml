@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable]
 
     steps:
@@ -75,10 +75,16 @@ jobs:
       if: matrix.os == 'macos-latest'
       run: brew install bind
 
+    - name: Install dig (Windows)
+      if: matrix.os == 'windows-latest'
+      run: choco install bind-toolsonly -y
+
     - name: Run integration tests
+      shell: bash
       run: cd it && ./run-tests.sh
 
     - name: Check for TODO/FIXME in source
+      shell: bash
       run: |
         if grep -r "TODO\|FIXME" src/ --exclude-dir=target; then
           echo "Found TODO or FIXME comments in source code"
