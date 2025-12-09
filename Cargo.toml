@@ -2,6 +2,14 @@
 name = "lrmdns"
 version = "0.1.0"
 edition = "2024"
+authors = ["lrmdns contributors"]
+description = "Lightweight authoritative-only DNS server written in Rust with DNSSEC support"
+repository = "https://github.com/marascio/lrmdns"
+homepage = "https://github.com/marascio/lrmdns"
+license = "MIT"
+keywords = ["dns", "server", "authoritative", "networking", "async"]
+categories = ["network-programming"]
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
