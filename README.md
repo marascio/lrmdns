@@ -1,5 +1,8 @@
 # lrmdns - Lightweight Authoritative DNS Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+
 A simple, fast, and reliable authoritative-only DNS server written in Rust.
 
 ## Overview
@@ -35,12 +38,13 @@ lrmdns is an authoritative DNS server that responds to queries for domains it ma
 
 ### Prerequisites
 
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
+- Rust 1.88.0+ (install via [rustup](https://rustup.rs/))
+  - Required for Rust 2024 edition features
 
 ### Building from Source
 
 ```bash
-git clone <repository>
+git clone https://github.com/marascio/lrmdns.git
 cd lrmdns
 cargo build --release
 ```
@@ -275,10 +279,8 @@ Once signed, point your zone configuration to the signed zone file.
 ## Current Limitations
 
 - **No online DNSSEC signing** - zones must be pre-signed offline
-- **No NSEC3** support - only NSEC for authenticated denial
+- **No NSEC3 support** - only NSEC for authenticated denial
 - **No dynamic updates** (RFC 2136)
-- **No zone reloading** without restart - Planned for Phase 3
-- **No rate limiting** - Planned for Phase 3
 
 See `plan.md` for the full implementation roadmap.
 
@@ -296,7 +298,7 @@ This is a learning/experimental project. Contributions welcome!
 
 ## License
 
-MIT (or your preferred license)
+MIT
 
 ## Resources
 
