@@ -377,32 +377,6 @@ async fn handle_tcp_connection(
             return Ok(());
         }
 
-        // Check rate limiting
-        if let Some(ref limiter) = rate_limiter
-            && !limiter.check_rate_limit(addr.ip())
-        {
-            metrics.record_rate_limited();
-            tracing::warn!("Rate limited TCP query from {}", addr);
-
-            // Send REFUSED response
-            let mut response = Message::new();
-            response.set_message_type(hickory_proto::op::MessageType::Response);
-            response.set_response_code(hickory_proto::op::ResponseCode::Refused);
-
-            metrics.record_response(hickory_proto::op::ResponseCode::Refused);
-
-            let response_buf = response
-                .to_bytes()
-                .context("Failed to encode rate limit response")?;
-
-            let len = (response_buf.len() as u16).to_be_bytes();
-            stream.write_all(&len).await?;
-            stream.write_all(&response_buf).await?;
-
-            metrics.record_latency(start.elapsed());
-            return Ok(());
-        }
-
         // Read the DNS message
         let mut msg_buf = vec![0u8; msg_len];
         stream
@@ -443,6 +417,33 @@ async fn handle_tcp_connection(
                 return Ok(());
             }
         };
+
+        // Check rate limiting (after parsing query to get ID for REFUSED response)
+        if let Some(ref limiter) = rate_limiter
+            && !limiter.check_rate_limit(addr.ip())
+        {
+            metrics.record_rate_limited();
+            tracing::warn!("Rate limited TCP query from {}", addr);
+
+            // Send REFUSED response with correct query ID
+            let mut response = Message::new();
+            response.set_id(query.id());
+            response.set_message_type(hickory_proto::op::MessageType::Response);
+            response.set_response_code(hickory_proto::op::ResponseCode::Refused);
+
+            metrics.record_response(hickory_proto::op::ResponseCode::Refused);
+
+            let response_buf = response
+                .to_bytes()
+                .context("Failed to encode rate limit response")?;
+
+            let len = (response_buf.len() as u16).to_be_bytes();
+            stream.write_all(&len).await?;
+            stream.write_all(&response_buf).await?;
+
+            metrics.record_latency(start.elapsed());
+            return Ok(());
+        }
 
         // Record query metrics
         let has_edns = query.extensions().is_some();
@@ -770,6 +771,124 @@ mod tests {
             "with a {}-byte receive buffer, a valid EDNS query should parse successfully; length was {}",
             MAX_UDP_RECV_SIZE,
             received.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcp_rate_limit_response_echoes_query_id() {
+        // Bug: When rate-limited, TCP REFUSED response uses default ID=0
+        // instead of echoing the query ID from the request.
+        use crate::ratelimit::RateLimiter;
+        use hickory_proto::op::{Message, Query};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+
+        // Create rate limiter with very low limit (1 query per second)
+        let rate_limiter = Arc::new(RateLimiter::new(1));
+
+        // Create test zone and processor
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 1,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+        let mut zone = Zone::new(origin.clone(), soa);
+        let a_record = Record::from_rdata(
+            Name::from_str("www.example.com.").unwrap(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+        );
+        zone.add_record(a_record);
+        let mut store = ZoneStore::new();
+        store.add_zone(zone);
+        let zone_store = Arc::new(RwLock::new(store));
+        let processor = Arc::new(QueryProcessor::new(zone_store.clone()));
+        let metrics = Arc::new(Metrics::new());
+
+        // Start a TCP server on a random port
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Spawn server task
+        let server_limiter = rate_limiter.clone();
+        let server_processor = processor.clone();
+        let server_metrics = metrics.clone();
+        let server_zones = zone_store.clone();
+        tokio::spawn(async move {
+            if let Ok((stream, peer_addr)) = listener.accept().await {
+                let _ = handle_tcp_connection(
+                    stream,
+                    peer_addr,
+                    server_processor,
+                    server_metrics,
+                    Some(server_limiter),
+                    server_zones,
+                    None,
+                )
+                .await;
+            }
+        });
+
+        // Give server time to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Connect to server
+        let mut client = TcpStream::connect(&addr).await.unwrap();
+
+        // Exhaust rate limit with first query (ID=1000)
+        let mut query1 = Message::new();
+        query1.set_id(1000);
+        query1.add_query(Query::query(
+            Name::from_utf8("www.example.com.").unwrap(),
+            hickory_proto::rr::RecordType::A,
+        ));
+        let query1_buf = query1.to_bytes().unwrap();
+        let len1 = (query1_buf.len() as u16).to_be_bytes();
+        client.write_all(&len1).await.unwrap();
+        client.write_all(&query1_buf).await.unwrap();
+
+        // Read response for first query
+        let mut len_buf = [0u8; 2];
+        client.read_exact(&mut len_buf).await.unwrap();
+        let response_len = u16::from_be_bytes(len_buf) as usize;
+        let mut response_buf = vec![0u8; response_len];
+        client.read_exact(&mut response_buf).await.unwrap();
+
+        // Second query should be rate-limited (ID=2000)
+        let mut query2 = Message::new();
+        query2.set_id(2000);
+        query2.add_query(Query::query(
+            Name::from_utf8("mail.example.com.").unwrap(),
+            hickory_proto::rr::RecordType::A,
+        ));
+        let query2_buf = query2.to_bytes().unwrap();
+        let len2 = (query2_buf.len() as u16).to_be_bytes();
+        client.write_all(&len2).await.unwrap();
+        client.write_all(&query2_buf).await.unwrap();
+
+        // Read response for rate-limited query
+        let mut len_buf2 = [0u8; 2];
+        client.read_exact(&mut len_buf2).await.unwrap();
+        let response_len2 = u16::from_be_bytes(len_buf2) as usize;
+        let mut response_buf2 = vec![0u8; response_len2];
+        client.read_exact(&mut response_buf2).await.unwrap();
+
+        let response = Message::from_bytes(&response_buf2).unwrap();
+        assert_eq!(
+            response.response_code(),
+            hickory_proto::op::ResponseCode::Refused
+        );
+        assert_eq!(
+            response.id(),
+            2000,
+            "Rate-limited REFUSED response should echo query ID, got {}",
+            response.id()
         );
     }
 }
