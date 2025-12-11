@@ -81,11 +81,17 @@ wait_for_server() {
     local max_attempts=50
     local attempt=0
 
+    # Detect which netcat command is available (nc or ncat)
+    local nc_cmd="nc"
+    if command -v ncat >/dev/null 2>&1; then
+        nc_cmd="ncat"
+    fi
+
     # Poll the port until the server responds or we timeout
     while [ $attempt -lt $max_attempts ]; do
-        # Try to connect to the port using nc or by sending a DNS query
+        # Try to connect to the port using nc/ncat
         # A successful response (even REFUSED) means the server is up
-        if nc -z -w 1 127.0.0.1 "$port" 2>/dev/null; then
+        if $nc_cmd -z -w 1 127.0.0.1 "$port" 2>/dev/null; then
             # Give server a bit more time to fully initialize
             sleep 0.1
             return 0

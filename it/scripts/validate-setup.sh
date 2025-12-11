@@ -17,10 +17,23 @@ if ! command -v dig &>/dev/null; then
     exit 1
 fi
 
-# Check nc (netcat)
-if ! command -v nc &>/dev/null; then
-    echo "Error: nc (netcat) not found. Install netcat package"
-    exit 1
+# Check nc/ncat (netcat) based on platform
+# Windows (Git Bash, Cygwin, WSL, MSYS) requires ncat from nmap package
+# Unix variants (Linux, macOS) require nc
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    # Windows - require ncat
+    if ! command -v ncat &>/dev/null; then
+        echo "Error: ncat not found. On Windows, install nmap package: choco install nmap"
+        exit 1
+    fi
+else
+    # Unix (Linux, macOS, BSD, etc.) - require nc
+    if ! command -v nc &>/dev/null; then
+        echo "Error: nc (netcat) not found. Install netcat package"
+        echo "  - Ubuntu/Debian: sudo apt-get install netcat-openbsd"
+        echo "  - macOS: brew install netcat"
+        exit 1
+    fi
 fi
 
 # Check tcpreplay (optional)
