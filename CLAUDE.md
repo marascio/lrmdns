@@ -246,4 +246,5 @@ Integration tests are in the `it/` directory and use BATS (Bash Automated Testin
 **Testing**:
 - BATS (git submodule in `it/bats/`)
 - `dig` (from BIND tools)
+- `nc` (netcat for port checking)
 - `curl` (for API tests)

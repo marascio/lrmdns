@@ -13,7 +13,14 @@ fi
 
 # Check dig
 if ! command -v dig &>/dev/null; then
-    echo "Warning: dig not found. Install bind-tools or dnsutils"
+    echo "Error: dig not found. Install bind-tools or dnsutils"
+    exit 1
+fi
+
+# Check nc (netcat)
+if ! command -v nc &>/dev/null; then
+    echo "Error: nc (netcat) not found. Install netcat package"
+    exit 1
 fi
 
 # Check tcpreplay (optional)

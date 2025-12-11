@@ -78,17 +78,17 @@ jobs:
     - name: Run unit tests (release)
       run: cargo test --release --verbose
 
-    - name: Install dig (Ubuntu)
+    - name: Install dig and nc (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
-      run: sudo apt-get update && sudo apt-get install -y dnsutils
+      run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
-    - name: Install dig (macOS)
+    - name: Install dig and nc (macOS)
       if: matrix.os == 'macos-latest'
-      run: brew install bind
+      run: brew install bind netcat
 
-    - name: Install dig (Windows)
+    - name: Install dig and nc (Windows)
       if: matrix.os == 'windows-latest'
-      run: choco install bind-toolsonly -y
+      run: choco install bind-toolsonly netcat -y
 
     - name: Run integration tests
       shell: bash

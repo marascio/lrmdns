@@ -6,25 +6,13 @@ is_windows() {
     [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]
 }
 
-# Get a unique port for this test (based on BATS test number or process ID)
+# Get a unique port for this test (based on process ID)
 # This allows parallel test execution without port conflicts
 get_unique_port() {
-    # Use BATS_TEST_NUMBER if available (parallel mode), otherwise use process ID
     local base_port=20000
-    if [ -n "$BATS_TEST_NUMBER" ]; then
-        echo $((base_port + BATS_TEST_NUMBER))
-    else
-        echo $((base_port + $$ % 10000))
-    fi
-}
-
-# Get unique temp file prefix for this test
-get_temp_prefix() {
-    if [ -n "$BATS_TEST_NUMBER" ]; then
-        echo "/tmp/lrmdns-test-${BATS_TEST_NUMBER}"
-    else
-        echo "/tmp/lrmdns-test-$$"
-    fi
+    # Use process ID for uniqueness across all parallel tests
+    # Each test runs in its own subprocess, so $$ is globally unique
+    echo $((base_port + ($$ % 10000)))
 }
 
 # Start lrmdns server
@@ -32,8 +20,8 @@ get_temp_prefix() {
 start_server() {
     local source_config="${1:-fixtures/configs/basic.yaml}"
     local port="${2:-$(get_unique_port)}"
-    local log_file="$(get_temp_prefix).log"
-    local temp_config="$(get_temp_prefix)-config.yaml"
+    local log_file="$BATS_TEST_TMPDIR/server.log"
+    local temp_config="$BATS_TEST_TMPDIR/config.yaml"
 
     # Kill any existing instance for this test
     stop_server || true
@@ -71,20 +59,43 @@ start_server() {
 stop_server() {
     if [ -n "$LRMDNS_PID" ]; then
         kill "$LRMDNS_PID" 2>/dev/null || true
-        wait "$LRMDNS_PID" 2>/dev/null || true
+        # Wait for process to actually terminate
+        local attempts=0
+        while kill -0 "$LRMDNS_PID" 2>/dev/null && [ $attempts -lt 10 ]; do
+            sleep 0.1
+            attempts=$((attempts + 1))
+        done
+        # Force kill if still alive
+        kill -9 "$LRMDNS_PID" 2>/dev/null || true
         unset LRMDNS_PID
     fi
 
-    # Cleanup any orphaned processes - be more specific to avoid matching other processes
-    pkill -f "lrmdns fixtures" 2>/dev/null || true
-    pkill -f "lrmdns lrmdns.yaml" 2>/dev/null || true
+    # DO NOT use pkill here - it kills servers from other parallel tests!
+    # Each test manages its own server via LRMDNS_PID
 }
 
 # Wait for server to be ready
 # Args: $1 = port
 wait_for_server() {
-    # Just sleep briefly - server starts very quickly
-    sleep 0.5
+    local port="${1:-$LRMDNS_PORT}"
+    local max_attempts=50
+    local attempt=0
+
+    # Poll the port until the server responds or we timeout
+    while [ $attempt -lt $max_attempts ]; do
+        # Try to connect to the port using nc or by sending a DNS query
+        # A successful response (even REFUSED) means the server is up
+        if nc -z -w 1 127.0.0.1 "$port" 2>/dev/null; then
+            # Give server a bit more time to fully initialize
+            sleep 0.1
+            return 0
+        fi
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+
+    echo "WARNING: Server did not respond on port $port after $max_attempts attempts" >&2
+    return 1
 }
 
 # Reload server zones (SIGHUP)
@@ -125,9 +136,5 @@ get_metrics() {
 # Cleanup on exit
 cleanup_server() {
     stop_server
-    if [ -n "$LRMDNS_LOG" ]; then
-        rm -f "$LRMDNS_LOG"
-    fi
-    # Clean up any temp config files created by this test
-    rm -f "$(get_temp_prefix)"*.yaml 2>/dev/null || true
+    # BATS automatically cleans up BATS_TEST_TMPDIR - no manual file deletion needed
 }

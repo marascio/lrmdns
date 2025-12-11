@@ -7,10 +7,15 @@ load '../bats/test_helper/bats-assert/load'
 
 # Tests for various SOA record format support
 
+# Ensure cleanup happens even if test fails
+teardown() {
+    cleanup_server || true
+}
+
 @test "Single-line SOA format" {
     # Get unique port and temp file for this test
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-soa-single.yaml"
+    local config="$BATS_TEST_TMPDIR/soa-single.yaml"
 
     # Create temporary config for this zone
     cat > "$config" <<EOF
@@ -33,13 +38,11 @@ EOF
     # Query A record to ensure zone works
     result=$(dig @127.0.0.1 -p "$port" www.test.example. A +short)
     assert_equal "$result" "192.0.2.100"
-
-    cleanup_server
 }
 
 @test "Multi-line SOA with detailed comments" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-soa-comments.yaml"
+    local config="$BATS_TEST_TMPDIR/soa-comments.yaml"
 
     cat > "$config" <<EOF
 server:
@@ -64,13 +67,11 @@ EOF
     run dig @127.0.0.1 -p "$port" test2.example. MX +short
     assert_success
     assert_output --partial "mail.test2.example"
-
-    cleanup_server
 }
 
 @test "Multi-line SOA compact (no comments)" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-soa-compact.yaml"
+    local config="$BATS_TEST_TMPDIR/soa-compact.yaml"
 
     cat > "$config" <<EOF
 server:
@@ -92,13 +93,11 @@ EOF
     run dig @127.0.0.1 -p "$port" test3.example. NS +short
     assert_success
     assert_output --partial "ns1.test3.example"
-
-    cleanup_server
 }
 
 @test "Multi-line SOA with mixed grouping" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-soa-mixed.yaml"
+    local config="$BATS_TEST_TMPDIR/soa-mixed.yaml"
 
     cat > "$config" <<EOF
 server:
@@ -121,13 +120,11 @@ EOF
     run dig @127.0.0.1 -p "$port" ftp.test4.example. A +short
     assert_success
     assert_output --partial "192.0.2.90"
-
-    cleanup_server
 }
 
 @test "Multi-line SOA with tabs and mixed whitespace" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-soa-tabs.yaml"
+    local config="$BATS_TEST_TMPDIR/soa-tabs.yaml"
 
     cat > "$config" <<EOF
 server:
@@ -149,13 +146,11 @@ EOF
     # Query A record
     result=$(dig @127.0.0.1 -p "$port" ns1.test5.example. A +short)
     assert_equal "$result" "192.0.2.91"
-
-    cleanup_server
 }
 
 @test "Standard multi-line SOA (basic.zone)" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-basic.yaml"
+    local config="$BATS_TEST_TMPDIR/basic.yaml"
 
     # This tests the standard format we use in basic.zone
     cat > "$config" <<EOF
@@ -176,13 +171,11 @@ EOF
     assert_output --partial "2024010101"
     assert_output --partial "7200"
     assert_output --partial "86400"
-
-    cleanup_server
 }
 
 @test "All SOA formats return valid authoritative responses" {
     local port=$(get_unique_port)
-    local config="$(get_temp_prefix)-multi-zone.yaml"
+    local config="$BATS_TEST_TMPDIR/multi-zone.yaml"
 
     # Test that all formats produce authoritative responses
     cat > "$config" <<EOF
@@ -205,6 +198,4 @@ EOF
         assert_success
         assert_output --regexp "flags:.*aa"
     done
-
-    cleanup_server
 }

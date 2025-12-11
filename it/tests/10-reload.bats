@@ -8,12 +8,10 @@ load '../bats/test_helper/bats-assert/load'
 # Tests for zone reloading via SIGHUP signal (Unix only)
 
 setup() {
-    # Create unique test files for this test
-    TEST_ZONE="/tmp/lrmdns-reload-test-${BATS_TEST_NUMBER}.zone"
-    TEST_CONFIG="/tmp/lrmdns-reload-test-${BATS_TEST_NUMBER}.yaml"
-
-    # Clean up any leftover files from previous runs
-    rm -f "$TEST_ZONE" "$TEST_CONFIG" "$TEST_ZONE.bak"
+    # Create test-specific files in BATS_TEST_TMPDIR for automatic isolation and cleanup
+    TEST_ZONE="$BATS_TEST_TMPDIR/example.zone"
+    TEST_CONFIG="$BATS_TEST_TMPDIR/config.yaml"
+    # BATS_TEST_TMPDIR is fresh for each test - no cleanup needed
 
     # Get unique port for this test
     local port=$(get_unique_port)
@@ -61,7 +59,7 @@ EOF
 
 teardown() {
     cleanup_server
-    rm -f "$TEST_ZONE" "$TEST_CONFIG"
+    # BATS automatically cleans up BATS_TEST_TMPDIR - no manual file deletion needed
 }
 
 @test "Zone reload via SIGHUP - modify existing A record" {
@@ -229,8 +227,8 @@ EOF
         skip "SIGHUP signal not supported on Windows"
     fi
 
-    # Create second zone
-    local zone2="/tmp/lrmdns-reload-test2-${BATS_TEST_NUMBER}.zone"
+    # Create second zone in same test temp directory
+    local zone2="$BATS_TEST_TMPDIR/test.zone"
     cat > "$zone2" <<'EOF'
 $ORIGIN test.com.
 $TTL 3600
@@ -288,7 +286,5 @@ EOF
 
     result=$(query_a "www.test.com.")
     assert_equal "$result" "192.0.2.111"
-
-    # Cleanup
-    rm -f "$zone2"
+    # BATS automatically cleans up zone2 in BATS_TEST_TMPDIR
 }
