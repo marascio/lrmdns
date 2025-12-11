@@ -11,6 +11,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 const MAX_DNS_PACKET_SIZE: usize = 512;
+// We advertise EDNS payloads up to 4096 bytes; size the UDP receive buffer accordingly.
+const MAX_UDP_RECV_SIZE: usize = 4096;
 const MAX_TCP_DNS_PACKET_SIZE: usize = 65535;
 
 pub struct DnsServer {
@@ -56,7 +58,9 @@ impl DnsServer {
         tracing::info!("DNS server listening on {} (UDP)", self.listen_addr);
 
         let socket = Arc::new(socket);
-        let mut buf = vec![0u8; MAX_DNS_PACKET_SIZE];
+        // Size buffer to our advertised EDNS payload capability to avoid truncating
+        // otherwise-valid EDNS queries on receive.
+        let mut buf = vec![0u8; MAX_UDP_RECV_SIZE];
 
         loop {
             match socket.recv_from(&mut buf).await {
@@ -715,6 +719,57 @@ mod tests {
             "Even minimal truncated response should fit within {} bytes, got {}",
             max_udp_size,
             final_buf.len()
+        );
+    }
+
+    #[test]
+    fn test_udp_buffer_size_handles_large_edns_queries() {
+        // Regression guard: The UDP receive buffer should be at least as large as the
+        // advertised EDNS payload (4096 bytes). This test ensures a large EDNS query
+        // (>512 bytes but <4096 bytes) can be received without truncation.
+        use hickory_proto::op::{Edns, Message, Query};
+
+        // Build a large EDNS query
+        let mut query = Message::new();
+        query.set_id(0xBEEF);
+        let mut edns = Edns::new();
+        edns.set_max_payload(4096);
+        query.set_edns(edns);
+
+        // Add many TXT queries to bloat size beyond standard 512-byte DNS packet
+        for i in 0..40 {
+            let name = Name::from_utf8(format!("very-long-label-{}.example.com.", i)).unwrap();
+            query.add_query(Query::query(name, hickory_proto::rr::RecordType::TXT));
+        }
+
+        let full = query.to_bytes().expect("serializes");
+        assert!(
+            full.len() > MAX_DNS_PACKET_SIZE,
+            "setup: query should exceed 512 bytes, got {}",
+            full.len()
+        );
+        assert!(
+            full.len() < MAX_UDP_RECV_SIZE,
+            "setup: query should fit within advertised receive buffer {}, got {}",
+            MAX_UDP_RECV_SIZE,
+            full.len()
+        );
+
+        // Full message should parse successfully
+        let parsed_full = Message::from_bytes(&full);
+        assert!(
+            parsed_full.is_ok(),
+            "full EDNS query should parse successfully"
+        );
+
+        // Verify that receiving into our advertised buffer size preserves the full message
+        let received = &full[..std::cmp::min(full.len(), MAX_UDP_RECV_SIZE)];
+        let parsed_received = Message::from_bytes(received);
+        assert!(
+            parsed_received.is_ok(),
+            "with a {}-byte receive buffer, a valid EDNS query should parse successfully; length was {}",
+            MAX_UDP_RECV_SIZE,
+            received.len()
         );
     }
 }
