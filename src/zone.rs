@@ -96,9 +96,13 @@ impl Zone {
         // Start with SOA
         records.push(self.get_soa_record());
 
-        // Add all other records
+        // Add all other records (excluding SOA to avoid duplication)
         for record_map in self.records.values() {
-            for record_vec in record_map.values() {
+            for (record_type, record_vec) in record_map.iter() {
+                // Skip SOA records - they're already added at start/end
+                if *record_type == RecordType::SOA {
+                    continue;
+                }
                 for record in record_vec {
                     records.push(record.clone());
                 }
@@ -2003,5 +2007,55 @@ $TTL 3600
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_axfr_should_only_include_two_soa_records() {
+        // This test demonstrates Bug #1: AXFR returns 3 SOA records instead of 2
+        // RFC 5936 Section 2.2 requires exactly two SOA records: one at start, one at end
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 2024010101,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+
+        let mut zone = Zone::new(origin.clone(), soa.clone());
+
+        // Add an A record
+        let a_record = Record::from_rdata(
+            Name::from_str("www.example.com.").unwrap(),
+            3600,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+        );
+        zone.add_record(a_record);
+
+        // Also add SOA to records map (simulating what zone file parser does)
+        let soa_record = zone.get_soa_record();
+        zone.add_record(soa_record);
+
+        // Get all records for AXFR
+        let all_records = zone.get_all_records();
+
+        // Count SOA records
+        let soa_count = all_records
+            .iter()
+            .filter(|r| r.record_type() == RecordType::SOA)
+            .count();
+
+        // Should be exactly 2 (start and end), but current implementation returns 3
+        assert_eq!(
+            soa_count, 2,
+            "AXFR should include exactly 2 SOA records (start and end), found {}",
+            soa_count
+        );
+
+        // Verify structure: first and last should be SOA
+        assert_eq!(all_records.first().unwrap().record_type(), RecordType::SOA);
+        assert_eq!(all_records.last().unwrap().record_type(), RecordType::SOA);
     }
 }

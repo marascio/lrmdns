@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use hickory_proto::rr::dnssec::DigestType;
 use hickory_proto::rr::{Name, RData, Record, RecordType};
+use hickory_proto::serialize::binary::BinEncodable;
 use sha2::{Digest, Sha256, Sha512};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -63,9 +64,12 @@ pub fn verify_ds(ds: &Record, dnskey: &Record) -> Result<()> {
     let mut digest_input = Vec::new();
 
     // Owner name in wire format (canonical form - lowercase)
+    // RFC 4034 Section 5.1.4: Use canonical wire format, not string format
     let owner_name = dnskey.name().to_lowercase();
-    // Simplified: convert to string and then bytes (not proper wire format, but functional)
-    digest_input.extend_from_slice(owner_name.to_string().as_bytes());
+    let owner_name_wire = owner_name
+        .to_bytes()
+        .map_err(|e| anyhow!("Failed to convert owner name to wire format: {}", e))?;
+    digest_input.extend_from_slice(&owner_name_wire);
 
     // DNSKEY RDATA in wire format
     digest_input.extend_from_slice(&dnskey_data.flags().to_be_bytes());
@@ -528,6 +532,94 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Algorithm mismatch")
+        );
+    }
+
+    #[test]
+    fn test_ds_verification_with_correct_wire_format() {
+        // This test demonstrates Bug #2: DS verification uses string format instead of wire format
+        // RFC 4034 Section 5.1.4 requires canonical wire format for owner name in digest
+
+        // Use a simple example with a known correct digest
+        // Owner name: example.com.
+        // DNSKEY algorithm: 8 (RSA/SHA-256)
+        // Flags: 256 (Zone Key)
+        // Protocol: 3
+        // Public key: simple 4-byte key for testing
+
+        let public_key = vec![0x01, 0x02, 0x03, 0x04];
+
+        // Create DNSKEY
+        // Parameters: zone_key, secure_entry_point, revoke, algorithm, public_key
+        let dnskey = hickory_proto::rr::dnssec::rdata::DNSKEY::new(
+            true,  // zone_key (flag bit 7 set = 256)
+            false, // secure_entry_point
+            false, // revoke
+            hickory_proto::rr::dnssec::Algorithm::RSASHA256,
+            public_key.clone(),
+        );
+
+        let owner_name = Name::from_utf8("example.com.").unwrap();
+
+        // Compute CORRECT digest using wire format (not string format)
+        // Wire format of "example.com." is:
+        // 07 65 78 61 6d 70 6c 65 03 63 6f 6d 00
+        // (length-prefixed labels)
+        let mut digest_input = Vec::new();
+
+        // Manually encode owner name in wire format
+        digest_input.push(7); // length of "example"
+        digest_input.extend_from_slice(b"example");
+        digest_input.push(3); // length of "com"
+        digest_input.extend_from_slice(b"com");
+        digest_input.push(0); // root label
+
+        // Add DNSKEY RDATA
+        digest_input.extend_from_slice(&256u16.to_be_bytes()); // flags
+        digest_input.push(3); // protocol
+        digest_input.push(8); // algorithm (RSASHA256)
+        digest_input.extend_from_slice(&public_key);
+
+        // Compute correct SHA-256 digest
+        let mut hasher = Sha256::new();
+        hasher.update(&digest_input);
+        let correct_digest = hasher.finalize().to_vec();
+
+        // Create DS record with the correct digest
+        let ds = hickory_proto::rr::dnssec::rdata::DS::new(
+            compute_key_tag(&Record::from_rdata(
+                owner_name.clone(),
+                300,
+                RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                    dnskey.clone(),
+                )),
+            ))
+            .unwrap(),
+            hickory_proto::rr::dnssec::Algorithm::RSASHA256,
+            DigestType::SHA256,
+            correct_digest,
+        );
+
+        let ds_record = Record::from_rdata(
+            owner_name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(ds)),
+        );
+
+        let dnskey_record = Record::from_rdata(
+            owner_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        // This should succeed with correct wire format, but fails with string format
+        let result = verify_ds(&ds_record, &dnskey_record);
+        assert!(
+            result.is_ok(),
+            "DS verification should succeed with correct wire format digest, but got error: {:?}",
+            result.err()
         );
     }
 }

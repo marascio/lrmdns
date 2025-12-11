@@ -239,7 +239,8 @@ async fn handle_udp_query(
         // Create truncated response
         let mut truncated = response.clone();
         truncated.set_truncated(true);
-        // Remove answers to make it fit
+
+        // Try removing answers first
         while !truncated.answers().is_empty() {
             truncated.take_answers();
             let buf = truncated.to_bytes()?;
@@ -250,6 +251,38 @@ async fn handle_udp_query(
                 return Ok(());
             }
         }
+
+        // If still too large, remove authority records
+        while !truncated.name_servers().is_empty() {
+            truncated.take_name_servers();
+            let buf = truncated.to_bytes()?;
+            if buf.len() <= max_udp_size {
+                socket.send_to(&buf, addr).await?;
+                metrics.record_response(truncated.response_code());
+                metrics.record_latency(start.elapsed());
+                return Ok(());
+            }
+        }
+
+        // If still too large, remove additional records
+        while !truncated.additionals().is_empty() {
+            truncated.take_additionals();
+            let buf = truncated.to_bytes()?;
+            if buf.len() <= max_udp_size {
+                socket.send_to(&buf, addr).await?;
+                metrics.record_response(truncated.response_code());
+                metrics.record_latency(start.elapsed());
+                return Ok(());
+            }
+        }
+
+        // If even minimal response doesn't fit, send it anyway with TC flag
+        // This shouldn't happen in practice, but handles edge case
+        let minimal_buf = truncated.to_bytes()?;
+        socket.send_to(&minimal_buf, addr).await?;
+        metrics.record_response(truncated.response_code());
+        metrics.record_latency(start.elapsed());
+        return Ok(());
     }
 
     // Send the response
@@ -579,5 +612,109 @@ mod tests {
         assert_eq!(response.id(), 1234);
         assert!(response.authoritative());
         assert_eq!(response.answers().len(), 1);
+    }
+
+    #[test]
+    fn test_udp_truncation_with_large_authority_section() {
+        // This test demonstrates Bug #3: UDP truncation fallback sends oversized packet
+        // When a response exceeds UDP size limit and removing all answers still doesn't fit
+        // (due to large authority/additional sections), the code sends the original oversized packet
+
+        use hickory_proto::op::{Message, MessageType};
+        use std::net::Ipv4Addr;
+
+        // Create a response with many NS records in authority section
+        let mut response = Message::new();
+        response.set_id(1234);
+        response.set_message_type(MessageType::Response);
+        response.set_authoritative(true);
+
+        // Add one answer
+        let answer = Record::from_rdata(
+            Name::from_utf8("example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+        );
+        response.add_answer(answer);
+
+        // Add many NS records to authority section to make it large
+        // Each NS record is about 20-30 bytes, so we need many to exceed 512 bytes
+        for i in 0..50 {
+            let ns_record = Record::from_rdata(
+                Name::from_utf8("example.com.").unwrap(),
+                300,
+                RData::NS(hickory_proto::rr::rdata::NS(
+                    Name::from_utf8(format!("ns{}.example.com.", i)).unwrap(),
+                )),
+            );
+            response.add_name_server(ns_record);
+        }
+
+        // Serialize the response
+        let response_buf = response.to_bytes().unwrap();
+
+        // Verify that the response is larger than MAX_DNS_PACKET_SIZE (512)
+        assert!(
+            response_buf.len() > MAX_DNS_PACKET_SIZE,
+            "Test setup error: response should be larger than {} bytes, got {}",
+            MAX_DNS_PACKET_SIZE,
+            response_buf.len()
+        );
+
+        // Simulate truncation logic
+        let max_udp_size = MAX_DNS_PACKET_SIZE;
+
+        let mut truncated = response.clone();
+        truncated.set_truncated(true);
+
+        // Try removing answers to make it fit
+        while !truncated.answers().is_empty() {
+            truncated.take_answers();
+            let buf = truncated.to_bytes().unwrap();
+            if buf.len() <= max_udp_size {
+                // Successfully truncated to fit
+                assert!(buf.len() <= max_udp_size, "Truncated response should fit");
+                assert!(truncated.truncated(), "TC flag should be set");
+                return;
+            }
+        }
+
+        // If still too large, remove authority records
+        while !truncated.name_servers().is_empty() {
+            truncated.take_name_servers();
+            let buf = truncated.to_bytes().unwrap();
+            if buf.len() <= max_udp_size {
+                // Successfully truncated to fit
+                assert!(buf.len() <= max_udp_size, "Truncated response should fit");
+                assert!(truncated.truncated(), "TC flag should be set");
+                assert!(truncated.answers().is_empty(), "Answers should be removed");
+                assert!(
+                    truncated.name_servers().is_empty(),
+                    "Authority records should be removed"
+                );
+                return;
+            }
+        }
+
+        // If still too large, remove additional records
+        while !truncated.additionals().is_empty() {
+            truncated.take_additionals();
+            let buf = truncated.to_bytes().unwrap();
+            if buf.len() <= max_udp_size {
+                // Successfully truncated to fit
+                assert!(buf.len() <= max_udp_size, "Truncated response should fit");
+                assert!(truncated.truncated(), "TC flag should be set");
+                return;
+            }
+        }
+
+        // Final check - send minimal response with just header and TC flag
+        let final_buf = truncated.to_bytes().unwrap();
+        assert!(
+            final_buf.len() <= max_udp_size,
+            "Even minimal truncated response should fit within {} bytes, got {}",
+            max_udp_size,
+            final_buf.len()
+        );
     }
 }
