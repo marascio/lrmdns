@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run all integration tests
 
+set -x
 set -e
 
 cd "$(dirname "$0")"
