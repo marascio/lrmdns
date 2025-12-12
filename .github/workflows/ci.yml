@@ -93,17 +93,8 @@ jobs:
         echo "C:\Program Files (x86)\Nmap" >> $GITHUB_PATH
 
     - name: Run integration tests
-      if: matrix.os != 'windows-latest'
       shell: bash
       run: cd it && ./run-tests.sh
-
-    - name: Run integration tests (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        refreshenv
-        cd it
-        bash ./run-tests.sh
 
     - name: Check for TODO/FIXME in source
       shell: bash
