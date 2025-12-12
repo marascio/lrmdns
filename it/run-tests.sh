@@ -18,6 +18,7 @@ OPTIONS:
   -s, --serial            Run tests serially (disables parallelization)
   -t, --timeout SECONDS   Set test timeout in seconds (default: 60)
   -p, --profile PROFILE   Build profile: release or debug (default: release)
+  -c, --coverage          Generate code coverage report (requires cargo-llvm-cov)
 
 BATS_ARGS:
   Additional arguments passed directly to BATS (e.g., test file patterns)
@@ -28,20 +29,26 @@ EXAMPLES:
   run-tests.sh --jobs 4                  Run with 4 parallel jobs
   run-tests.sh --timeout 120             Set 120 second timeout
   run-tests.sh --profile debug           Run tests with debug binary
+  run-tests.sh --coverage                Generate coverage report
   run-tests.sh tests/01-basic-queries.bats  Run specific test file
 
 ENVIRONMENT:
   BATS_TEST_TIMEOUT       Test timeout (set via --timeout or defaults to 60)
   LRMDNS_BIN              Path to lrmdns binary (overrides --profile)
 
+COVERAGE:
+  Coverage requires cargo-llvm-cov: cargo install cargo-llvm-cov
+  Output: coverage.lcov (LCOV format for Codecov)
+
 EOF
 }
 
 # Parse arguments
-# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile
+# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile, no coverage
 PARALLEL_JOBS=""
 RUN_SERIAL=false
 BUILD_PROFILE="release"
+ENABLE_COVERAGE=false
 BATS_ARGS=()
 
 # Use existing BATS_TEST_TIMEOUT from environment, or default to 60
@@ -77,6 +84,10 @@ while [[ $# -gt 0 ]]; do
             BUILD_PROFILE="$2"
             shift 2
             ;;
+        -c|--coverage)
+            ENABLE_COVERAGE=true
+            shift
+            ;;
         *)
             BATS_ARGS+=("$1")
             shift
@@ -84,9 +95,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Set LRMDNS_BIN if not already set in environment
+# Set LRMDNS_BIN based on coverage and profile
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ]; then
-    export LRMDNS_BIN="../target/${BUILD_PROFILE}/lrmdns"
+    if [ "$ENABLE_COVERAGE" = true ]; then
+        # cargo-llvm-cov puts instrumented binaries in a different location
+        export LRMDNS_BIN="../target/llvm-cov-target/${BUILD_PROFILE}/lrmdns"
+    else
+        export LRMDNS_BIN="../target/${BUILD_PROFILE}/lrmdns"
+    fi
 fi
 
 # Export BATS_TEST_TIMEOUT for BATS to use
@@ -129,7 +145,11 @@ printf " Timeout : %ss\n" "${BATS_TEST_TIMEOUT}"
 if [ "$LRMDNS_BIN_SOURCE" = "environment" ]; then
     printf "  Binary : %s (from environment)\n" "${LRMDNS_BIN}"
 else
-    printf "  Binary : %s (%s)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
+    if [ "$ENABLE_COVERAGE" = true ]; then
+        printf "  Binary : %s (%s, coverage)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
+    else
+        printf "  Binary : %s (%s)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
+    fi
 fi
 echo
 
@@ -138,11 +158,20 @@ echo
 
 # Build lrmdns if needed (only when using profile-based path)
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ] && [ ! -f "$LRMDNS_BIN" ]; then
-    echo "Building lrmdns (${BUILD_PROFILE})..."
-    if [ "$BUILD_PROFILE" = "release" ]; then
-        cargo build --release
+    if [ "$ENABLE_COVERAGE" = true ]; then
+        echo "Building lrmdns with coverage instrumentation (${BUILD_PROFILE})..."
+        if [ "$BUILD_PROFILE" = "release" ]; then
+            cargo llvm-cov --no-report --release
+        else
+            cargo llvm-cov --no-report
+        fi
     else
-        cargo build
+        echo "Building lrmdns (${BUILD_PROFILE})..."
+        if [ "$BUILD_PROFILE" = "release" ]; then
+            cargo build --release
+        else
+            cargo build
+        fi
     fi
 fi
 
@@ -154,4 +183,12 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]];
     bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 else
     bats/bats-core/bin/bats --jobs "$PARALLEL_JOBS" tests/*.bats "${BATS_ARGS[@]}"
+fi
+
+# Generate coverage report if coverage was enabled
+if [ "$ENABLE_COVERAGE" = true ]; then
+    echo
+    echo "Generating coverage report..."
+    cargo llvm-cov report --lcov --output-path coverage.lcov
+    echo "Coverage report written to: it/coverage.lcov"
 fi

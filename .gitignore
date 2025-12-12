@@ -22,3 +22,9 @@ lrmdns-test.yaml
 secrets/
 .env
 .env.local
+
+# Coverage
+*.lcov
+*.profraw
+*.profdata
+it/coverage/
