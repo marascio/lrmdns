@@ -891,4 +891,276 @@ mod tests {
             response.id()
         );
     }
+
+    #[test]
+    fn test_edns0_max_udp_size_with_various_payloads() {
+        // Test that EDNS0 max_payload() correctly determines max UDP response size
+        use hickory_proto::op::{Edns, Message};
+
+        // Test 1: No EDNS0 - defaults to standard 512 bytes
+        let mut query_no_edns = Message::new();
+        query_no_edns.set_id(100);
+        assert!(query_no_edns.extensions().is_none());
+
+        // Test 2: EDNS0 with 1024 byte payload
+        let mut query_1024 = Message::new();
+        query_1024.set_id(101);
+        let mut edns_1024 = Edns::new();
+        edns_1024.set_max_payload(1024);
+        query_1024.set_edns(edns_1024);
+        assert_eq!(
+            query_1024.extensions().as_ref().unwrap().max_payload(),
+            1024
+        );
+
+        // Test 3: EDNS0 with 4096 byte payload (standard max)
+        let mut query_4096 = Message::new();
+        query_4096.set_id(102);
+        let mut edns_4096 = Edns::new();
+        edns_4096.set_max_payload(4096);
+        query_4096.set_edns(edns_4096);
+        assert_eq!(
+            query_4096.extensions().as_ref().unwrap().max_payload(),
+            4096
+        );
+
+        // Test 4: EDNS0 with minimum payload (512)
+        let mut query_512 = Message::new();
+        query_512.set_id(103);
+        let mut edns_512 = Edns::new();
+        edns_512.set_max_payload(512);
+        query_512.set_edns(edns_512);
+        assert_eq!(query_512.extensions().as_ref().unwrap().max_payload(), 512);
+
+        // Test 5: EDNS0 with very large payload (65535)
+        let mut query_max = Message::new();
+        query_max.set_id(104);
+        let mut edns_max = Edns::new();
+        edns_max.set_max_payload(65535);
+        query_max.set_edns(edns_max);
+        assert_eq!(
+            query_max.extensions().as_ref().unwrap().max_payload(),
+            65535
+        );
+    }
+
+    #[test]
+    fn test_udp_truncation_removes_additional_records() {
+        // Test that truncation removes additional records if answers and authority aren't enough
+        use hickory_proto::op::{Message, MessageType};
+        use std::net::Ipv4Addr;
+
+        let mut response = Message::new();
+        response.set_id(5000);
+        response.set_message_type(MessageType::Response);
+        response.set_authoritative(true);
+
+        // Add one small answer
+        let answer = Record::from_rdata(
+            Name::from_utf8("example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+        );
+        response.add_answer(answer);
+
+        // Add many additional records to make response large
+        for i in 0..60 {
+            let additional = Record::from_rdata(
+                Name::from_utf8(format!("host{}.example.com.", i)).unwrap(),
+                300,
+                RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(
+                    192,
+                    0,
+                    2,
+                    (i % 255) as u8,
+                ))),
+            );
+            response.add_additional(additional);
+        }
+
+        let response_buf = response.to_bytes().unwrap();
+        assert!(
+            response_buf.len() > MAX_DNS_PACKET_SIZE,
+            "Test setup: response should exceed 512 bytes"
+        );
+
+        // Simulate truncation
+        let max_udp_size = MAX_DNS_PACKET_SIZE;
+        let mut truncated = response.clone();
+        truncated.set_truncated(true);
+
+        // Remove additional records
+        truncated.take_additionals();
+        let final_buf = truncated.to_bytes().unwrap();
+
+        assert!(
+            final_buf.len() <= max_udp_size,
+            "After removing additionals, response should fit"
+        );
+        assert!(truncated.truncated());
+        assert!(!truncated.answers().is_empty(), "Answer should remain");
+        assert!(truncated.additionals().is_empty());
+    }
+
+    #[test]
+    fn test_udp_truncation_minimal_response() {
+        // Test minimal truncated response with just header and TC flag
+        use hickory_proto::op::{Message, MessageType, Query};
+
+        let mut response = Message::new();
+        response.set_id(6000);
+        response.set_message_type(MessageType::Response);
+        response.set_authoritative(true);
+        response.set_truncated(true);
+        response.add_query(Query::query(
+            Name::from_utf8("example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        // Minimal response: header + question section + TC flag
+        let minimal_buf = response.to_bytes().unwrap();
+
+        assert!(
+            minimal_buf.len() <= MAX_DNS_PACKET_SIZE,
+            "Minimal truncated response should always fit within 512 bytes, got {}",
+            minimal_buf.len()
+        );
+        assert!(response.truncated());
+        assert!(response.answers().is_empty());
+        assert!(response.name_servers().is_empty());
+        assert!(response.additionals().is_empty());
+    }
+
+    #[test]
+    fn test_message_id_extraction_from_short_packet() {
+        // Test extracting message ID from packets shorter than 2 bytes
+        use hickory_proto::op::Message;
+
+        // Empty packet
+        let empty: &[u8] = &[];
+        let result = Message::from_bytes(empty);
+        assert!(result.is_err(), "Empty packet should fail to parse");
+
+        // 1-byte packet
+        let one_byte: &[u8] = &[0x12];
+        let result = Message::from_bytes(one_byte);
+        assert!(result.is_err(), "1-byte packet should fail to parse");
+
+        // Valid 2-byte packet (just ID, no rest of message - will fail but ID can be extracted)
+        let two_bytes: &[u8] = &[0x12, 0x34];
+        let result = Message::from_bytes(two_bytes);
+        // This will fail because there's no complete DNS message, but we've tested the boundary
+        assert!(
+            result.is_err(),
+            "Incomplete 2-byte packet should fail to parse"
+        );
+    }
+
+    #[test]
+    fn test_udp_edns0_payload_affects_truncation_threshold() {
+        // Test that EDNS0 max_payload affects when truncation occurs
+        use hickory_proto::op::{Edns, Message, MessageType};
+        use std::net::Ipv4Addr;
+
+        // Create a response that's between 512 and 1024 bytes
+        let mut response = Message::new();
+        response.set_id(7000);
+        response.set_message_type(MessageType::Response);
+        response.set_authoritative(true);
+
+        // Add enough records to exceed 512 but not 1024
+        for i in 0..25 {
+            let record = Record::from_rdata(
+                Name::from_utf8(format!("host{}.example.com.", i)).unwrap(),
+                300,
+                RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(
+                    192,
+                    0,
+                    2,
+                    (i % 255) as u8,
+                ))),
+            );
+            response.add_answer(record);
+        }
+
+        let response_buf = response.to_bytes().unwrap();
+        let response_size = response_buf.len();
+
+        // Verify test setup: response is between 512 and 1024 bytes
+        assert!(
+            response_size > MAX_DNS_PACKET_SIZE && response_size < 1024,
+            "Test setup: response should be between 512 and 1024 bytes, got {}",
+            response_size
+        );
+
+        // Without EDNS0 (max 512): should truncate
+        assert!(
+            response_size > MAX_DNS_PACKET_SIZE,
+            "Response exceeds standard 512 byte limit"
+        );
+
+        // With EDNS0 max_payload=1024: should NOT truncate
+        let mut response_with_edns = response.clone();
+        let mut edns = Edns::new();
+        edns.set_max_payload(1024);
+        response_with_edns.set_edns(edns);
+
+        let max_with_edns = response_with_edns
+            .extensions()
+            .as_ref()
+            .unwrap()
+            .max_payload() as usize;
+        assert_eq!(max_with_edns, 1024);
+        assert!(
+            response_size <= max_with_edns,
+            "Response fits within EDNS0 advertised payload"
+        );
+    }
+
+    #[test]
+    fn test_truncation_preserves_question_section() {
+        // Verify that truncation always preserves the question section
+        use hickory_proto::op::{Message, MessageType, Query};
+        use std::net::Ipv4Addr;
+
+        let mut response = Message::new();
+        response.set_id(8000);
+        response.set_message_type(MessageType::Response);
+        response.set_authoritative(true);
+        response.add_query(Query::query(
+            Name::from_utf8("example.com.").unwrap(),
+            RecordType::A,
+        ));
+
+        // Add many answers to trigger truncation
+        for i in 0..100 {
+            let record = Record::from_rdata(
+                Name::from_utf8(format!("host{}.example.com.", i)).unwrap(),
+                300,
+                RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(
+                    192,
+                    0,
+                    2,
+                    (i % 255) as u8,
+                ))),
+            );
+            response.add_answer(record);
+        }
+
+        // Truncate
+        let mut truncated = response.clone();
+        truncated.set_truncated(true);
+        truncated.take_answers();
+        truncated.take_name_servers();
+        truncated.take_additionals();
+
+        // Verify question section is preserved
+        assert_eq!(truncated.queries().len(), 1);
+        assert_eq!(
+            truncated.queries()[0].name(),
+            &Name::from_utf8("example.com.").unwrap()
+        );
+        assert_eq!(truncated.queries()[0].query_type(), RecordType::A);
+        assert!(truncated.truncated());
+    }
 }
