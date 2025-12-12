@@ -88,17 +88,20 @@ jobs:
 
     - name: Install dig and nc (Windows)
       if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        choco install bind-toolsonly nmap -y
-        $nmapPath = (Get-ChildItem "C:\ProgramData\chocolatey\lib\nmap\tools\" -Directory | Where-Object {$_.Name -like "nmap-*"} | Select-Object -First 1).FullName
-        if ($nmapPath) {
-          echo $nmapPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        }
+      run: choco install bind-toolsonly nmap -y
 
     - name: Run integration tests
+      if: matrix.os != 'windows-latest'
       shell: bash
       run: cd it && ./run-tests.sh
+
+    - name: Run integration tests (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        refreshenv
+        cd it
+        bash ./run-tests.sh
 
     - name: Check for TODO/FIXME in source
       shell: bash
