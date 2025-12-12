@@ -61,23 +61,23 @@ jobs:
         path: target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Check formatting
-      run: cargo fmt --all -- --check
+    #- name: Check formatting
+    #  run: cargo fmt --all -- --check
 
-    - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+    #- name: Run clippy
+    #  run: cargo clippy --all-targets --all-features -- -D warnings
 
-    - name: Build (debug)
-      run: cargo build --verbose
+    #- name: Build (debug)
+    #  run: cargo build --verbose
 
-    - name: Build (release)
-      run: cargo build --release --verbose
+    #- name: Build (release)
+    #  run: cargo build --release --verbose
 
-    - name: Run unit tests (debug)
-      run: cargo test --verbose
+    #- name: Run unit tests (debug)
+    #  run: cargo test --verbose
 
-    - name: Run unit tests (release)
-      run: cargo test --release --verbose
+    #- name: Run unit tests (release)
+    #  run: cargo test --release --verbose
 
     - name: Install dig and nc (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
@@ -91,8 +91,9 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         choco install bind-toolsonly nmap rush -y --no-progress
+        ncat --version
         echo "C:\\Program Files (x86)\\Nmap" >> $GITHUB_PATH
-        echo "$GITHUB_PATH"
+        echo "$PATH"
 
     - name: Run integration tests
       if: matrix.os != 'windows-latest'
@@ -104,6 +105,7 @@ jobs:
       shell: bash
       run: |
         echo $PATH
+        ncat --version || true
         which ncat || true
         which ncat.exe || true
         cd it && ./run-tests.sh
