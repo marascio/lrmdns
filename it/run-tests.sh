@@ -40,14 +40,14 @@ if [ "$RUN_SERIAL" = false ] && [ -z "$PARALLEL_JOBS" ]; then
     fi
 fi
 
-# Check if GNU parallel is available (required for BATS --jobs flag)
-# If not available, fall back to serial execution
-if [ "$RUN_SERIAL" = false ] && ! command -v parallel &>/dev/null; then
-    echo "Warning: GNU parallel not found. Falling back to serial execution."
-    echo "  To enable parallel testing, install GNU parallel:"
-    echo "    - Ubuntu/Debian: sudo apt-get install parallel"
-    echo "    - macOS: brew install parallel"
-    echo "    - Windows: choco install parallel"
+# Check if GNU parallel or rush is available (required for BATS --jobs flag)
+# BATS supports either GNU parallel or shenwei356/rush for parallel execution
+# If neither is available, fall back to serial execution
+if [ "$RUN_SERIAL" = false ] && ! command -v parallel &>/dev/null && ! command -v rush &>/dev/null; then
+    echo "Warning: Neither GNU parallel nor rush found. Falling back to serial execution."
+    echo "  To enable parallel testing, install either:"
+    echo "    - GNU parallel: Ubuntu/Debian: sudo apt-get install parallel, macOS: brew install parallel"
+    echo "    - rush: cargo install rush-cli"
     RUN_SERIAL=true
 fi
 

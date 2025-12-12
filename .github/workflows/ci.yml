@@ -90,6 +90,10 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: choco install bind-toolsonly nmap -y --no-progress
 
+    - name: Install rush for parallel testing (Windows)
+      if: matrix.os == 'windows-latest'
+      run: cargo install rush-cli
+
     - name: Run integration tests
       if: matrix.os != 'windows-latest'
       shell: bash
