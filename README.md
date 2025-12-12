@@ -10,6 +10,7 @@
 # lrmdns - Lightweight Authoritative DNS Server
 
 [![CI](https://github.com/marascio/lrmdns/actions/workflows/ci.yml/badge.svg)](https://github.com/marascio/lrmdns/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/marascio/lrmdns/branch/main/graph/badge.svg)](https://codecov.io/gh/marascio/lrmdns)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
