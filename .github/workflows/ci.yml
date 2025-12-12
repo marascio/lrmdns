@@ -91,6 +91,7 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         choco install bind-toolsonly nmap rush -y --no-progress
+        refreshenv
         ncat --version
         echo "C:\\Program Files (x86)\\Nmap" >> $GITHUB_PATH
         echo "$PATH"
