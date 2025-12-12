@@ -622,4 +622,484 @@ mod tests {
             result.err()
         );
     }
+
+    #[test]
+    fn test_verify_ds_with_sha384_digest() {
+        use sha2::Sha384;
+
+        let public_key = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key.clone());
+
+        let owner_name = Name::from_utf8("example.com.").unwrap();
+
+        // Compute SHA-384 digest
+        let mut digest_input = Vec::new();
+        digest_input.push(7);
+        digest_input.extend_from_slice(b"example");
+        digest_input.push(3);
+        digest_input.extend_from_slice(b"com");
+        digest_input.push(0);
+        digest_input.extend_from_slice(&256u16.to_be_bytes());
+        digest_input.push(3);
+        digest_input.push(8);
+        digest_input.extend_from_slice(&public_key);
+
+        let mut hasher = Sha384::new();
+        hasher.update(&digest_input);
+        let correct_digest = hasher.finalize().to_vec();
+
+        let ds = DS::new(
+            compute_key_tag(&Record::from_rdata(
+                owner_name.clone(),
+                300,
+                RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                    dnskey.clone(),
+                )),
+            ))
+            .unwrap(),
+            Algorithm::RSASHA256,
+            DigestType::SHA384,
+            correct_digest,
+        );
+
+        let ds_record = Record::from_rdata(
+            owner_name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(ds)),
+        );
+
+        let dnskey_record = Record::from_rdata(
+            owner_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let result = verify_ds(&ds_record, &dnskey_record);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_ds_with_sha512_digest() {
+        let public_key = vec![0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key.clone());
+
+        let owner_name = Name::from_utf8("test.example.").unwrap();
+
+        // Compute SHA-512 digest
+        let mut digest_input = Vec::new();
+        digest_input.push(4);
+        digest_input.extend_from_slice(b"test");
+        digest_input.push(7);
+        digest_input.extend_from_slice(b"example");
+        digest_input.push(0);
+        digest_input.extend_from_slice(&256u16.to_be_bytes());
+        digest_input.push(3);
+        digest_input.push(8);
+        digest_input.extend_from_slice(&public_key);
+
+        let mut hasher = Sha512::new();
+        hasher.update(&digest_input);
+        let correct_digest = hasher.finalize().to_vec();
+
+        let ds = DS::new(
+            compute_key_tag(&Record::from_rdata(
+                owner_name.clone(),
+                300,
+                RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                    dnskey.clone(),
+                )),
+            ))
+            .unwrap(),
+            Algorithm::RSASHA256,
+            DigestType::SHA512,
+            correct_digest,
+        );
+
+        let ds_record = Record::from_rdata(
+            owner_name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(ds)),
+        );
+
+        let dnskey_record = Record::from_rdata(
+            owner_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let result = verify_ds(&ds_record, &dnskey_record);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_ds_with_wrong_digest() {
+        let public_key = vec![0x01, 0x02, 0x03, 0x04];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key);
+
+        let owner_name = Name::from_utf8("example.com.").unwrap();
+
+        // Use an incorrect digest
+        let wrong_digest = vec![0xff; 32];
+
+        let ds = DS::new(
+            compute_key_tag(&Record::from_rdata(
+                owner_name.clone(),
+                300,
+                RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                    dnskey.clone(),
+                )),
+            ))
+            .unwrap(),
+            Algorithm::RSASHA256,
+            DigestType::SHA256,
+            wrong_digest,
+        );
+
+        let ds_record = Record::from_rdata(
+            owner_name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(ds)),
+        );
+
+        let dnskey_record = Record::from_rdata(
+            owner_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let result = verify_ds(&ds_record, &dnskey_record);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("digest mismatch"));
+    }
+
+    #[test]
+    fn test_verify_ds_with_wrong_key_tag() {
+        let public_key = vec![0x01, 0x02, 0x03, 0x04];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key.clone());
+
+        let owner_name = Name::from_utf8("example.com.").unwrap();
+
+        // Compute correct digest
+        let mut digest_input = Vec::new();
+        digest_input.push(7);
+        digest_input.extend_from_slice(b"example");
+        digest_input.push(3);
+        digest_input.extend_from_slice(b"com");
+        digest_input.push(0);
+        digest_input.extend_from_slice(&256u16.to_be_bytes());
+        digest_input.push(3);
+        digest_input.push(8);
+        digest_input.extend_from_slice(&public_key);
+
+        let mut hasher = Sha256::new();
+        hasher.update(&digest_input);
+        let correct_digest = hasher.finalize().to_vec();
+
+        // Use wrong key tag
+        let ds = DS::new(
+            65000,
+            Algorithm::RSASHA256,
+            DigestType::SHA256,
+            correct_digest,
+        );
+
+        let ds_record = Record::from_rdata(
+            owner_name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DS(ds)),
+        );
+
+        let dnskey_record = Record::from_rdata(
+            owner_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let result = verify_ds(&ds_record, &dnskey_record);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Key tag mismatch"));
+    }
+
+    #[test]
+    fn test_validate_nsec_normal_case() {
+        use hickory_proto::rr::dnssec::rdata::NSEC;
+
+        // Test normal case: owner < query < next
+        let owner = Name::from_utf8("a.example.com.").unwrap();
+        let next = Name::from_utf8("z.example.com.").unwrap();
+        let query = Name::from_utf8("m.example.com.").unwrap();
+
+        let nsec = NSEC::new(next, vec![RecordType::NS, RecordType::SOA]);
+        let nsec_record = Record::from_rdata(
+            owner,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec)),
+        );
+
+        let result = validate_nsec_denial(&query, RecordType::A, &[nsec_record]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_nsec_wraparound_case() {
+        use hickory_proto::rr::dnssec::rdata::NSEC;
+
+        // Test wrap-around case: owner > next (last record in zone)
+        let owner = Name::from_utf8("z.example.com.").unwrap();
+        let next = Name::from_utf8("a.example.com.").unwrap();
+        let query = Name::from_utf8("zz.example.com.").unwrap();
+
+        let nsec = NSEC::new(next, vec![RecordType::NS]);
+        let nsec_record = Record::from_rdata(
+            owner,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec)),
+        );
+
+        let result = validate_nsec_denial(&query, RecordType::A, &[nsec_record]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_nsec_type_bitmap() {
+        use hickory_proto::rr::dnssec::rdata::NSEC;
+
+        // Test that query name matches owner, but type is not in bitmap
+        let owner = Name::from_utf8("www.example.com.").unwrap();
+        let next = Name::from_utf8("z.example.com.").unwrap();
+
+        // Type bitmap contains only NS and SOA
+        let nsec = NSEC::new(next, vec![RecordType::NS, RecordType::SOA]);
+        let nsec_record = Record::from_rdata(
+            owner.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec)),
+        );
+
+        // Query for A record which is not in the type bitmap
+        let result = validate_nsec_denial(&owner, RecordType::A, &[nsec_record]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_nsec_type_exists() {
+        use hickory_proto::rr::dnssec::rdata::NSEC;
+
+        // Test that query name matches owner and type IS in bitmap - should fail
+        let owner = Name::from_utf8("www.example.com.").unwrap();
+        let next = Name::from_utf8("z.example.com.").unwrap();
+
+        // Type bitmap contains A
+        let nsec = NSEC::new(next, vec![RecordType::A, RecordType::NS]);
+        let nsec_record = Record::from_rdata(
+            owner.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec)),
+        );
+
+        // Query for A record which IS in the type bitmap
+        let result = validate_nsec_denial(&owner, RecordType::A, &[nsec_record]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_nsec_multiple_records() {
+        use hickory_proto::rr::dnssec::rdata::NSEC;
+
+        // Test with multiple NSEC records - should find the right one
+        let owner1 = Name::from_utf8("a.example.com.").unwrap();
+        let next1 = Name::from_utf8("m.example.com.").unwrap();
+        let owner2 = Name::from_utf8("m.example.com.").unwrap();
+        let next2 = Name::from_utf8("z.example.com.").unwrap();
+        let query = Name::from_utf8("p.example.com.").unwrap();
+
+        let nsec1 = NSEC::new(next1, vec![RecordType::A]);
+        let nsec2 = NSEC::new(next2, vec![RecordType::A]);
+
+        let nsec_record1 = Record::from_rdata(
+            owner1,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec1)),
+        );
+
+        let nsec_record2 = Record::from_rdata(
+            owner2,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::NSEC(nsec2)),
+        );
+
+        let result = validate_nsec_denial(&query, RecordType::A, &[nsec_record1, nsec_record2]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_compute_key_tag_odd_length_key() {
+        // Test with odd-length public key
+        let public_key = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key);
+
+        let record = Record::from_rdata(
+            Name::from_utf8("example.com.").unwrap(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let key_tag = compute_key_tag(&record);
+        assert!(key_tag.is_ok());
+    }
+
+    #[test]
+    fn test_compute_key_tag_very_short_key() {
+        // Test with very short public key
+        let public_key = vec![0x01];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key);
+
+        let record = Record::from_rdata(
+            Name::from_utf8("example.com.").unwrap(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let key_tag = compute_key_tag(&record);
+        assert!(key_tag.is_ok());
+    }
+
+    #[test]
+    fn test_compute_key_tag_very_long_key() {
+        // Test with very long public key (512 bytes)
+        let public_key = vec![0x42; 512];
+        let dnskey = DNSKEY::new(true, false, false, Algorithm::RSASHA256, public_key);
+
+        let record = Record::from_rdata(
+            Name::from_utf8("example.com.").unwrap(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::DNSKEY(
+                dnskey,
+            )),
+        );
+
+        let key_tag = compute_key_tag(&record);
+        assert!(key_tag.is_ok());
+    }
+
+    #[test]
+    fn test_check_signature_validity_at_boundary() {
+        // Test signature at exact inception time
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+
+        let sig = SIG::new(
+            RecordType::A,
+            Algorithm::RSASHA256,
+            2,
+            300,
+            now + 3600,
+            now,
+            12345,
+            Name::from_str("example.com.").unwrap(),
+            vec![1, 2, 3],
+        );
+
+        let record = Record::from_rdata(
+            Name::from_utf8("www.example.com.").unwrap(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig)),
+        );
+
+        let result = check_signature_validity(&record);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_find_related_dnssec_with_multiple_rrsigs() {
+        let name = Name::from_utf8("example.com.").unwrap();
+
+        // Create RRSIG for A records
+        let sig_a = SIG::new(
+            RecordType::A,
+            Algorithm::RSASHA256,
+            2,
+            300,
+            12345,
+            12340,
+            54321,
+            name.clone(),
+            vec![1, 2, 3],
+        );
+
+        let rrsig_a = Record::from_rdata(
+            name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig_a)),
+        );
+
+        // Create RRSIG for AAAA records
+        let sig_aaaa = SIG::new(
+            RecordType::AAAA,
+            Algorithm::RSASHA256,
+            2,
+            300,
+            12345,
+            12340,
+            54321,
+            name.clone(),
+            vec![4, 5, 6],
+        );
+
+        let rrsig_aaaa = Record::from_rdata(
+            name.clone(),
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig_aaaa)),
+        );
+
+        let records = vec![rrsig_a, rrsig_aaaa];
+
+        // Should only find RRSIG for A records
+        let result = find_related_dnssec_records(&records, &name, RecordType::A);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_find_related_dnssec_with_wrong_name() {
+        let name = Name::from_utf8("example.com.").unwrap();
+        let other_name = Name::from_utf8("other.com.").unwrap();
+
+        let sig = SIG::new(
+            RecordType::A,
+            Algorithm::RSASHA256,
+            2,
+            300,
+            12345,
+            12340,
+            54321,
+            other_name.clone(),
+            vec![1, 2, 3],
+        );
+
+        let rrsig = Record::from_rdata(
+            other_name,
+            300,
+            RData::DNSSEC(hickory_proto::rr::dnssec::rdata::DNSSECRData::SIG(sig)),
+        );
+
+        let records = vec![rrsig];
+
+        // Should not find RRSIG with different name
+        let result = find_related_dnssec_records(&records, &name, RecordType::A);
+        assert_eq!(result.len(), 0);
+    }
 }
