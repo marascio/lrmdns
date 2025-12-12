@@ -193,6 +193,11 @@ if [ "$ENABLE_COVERAGE" = true ]; then
     echo
     echo "Generating coverage report..."
     # Need to run from project root where Cargo.toml is
-    (cd .. && cargo llvm-cov report --lcov --output-path it/coverage.lcov)
+    # Must match the build profile used above
+    if [ "$BUILD_PROFILE" = "release" ]; then
+        (cd .. && cargo llvm-cov report --release --lcov --output-path it/coverage.lcov)
+    else
+        (cd .. && cargo llvm-cov report --lcov --output-path it/coverage.lcov)
+    fi
     echo "Coverage report written to: it/coverage.lcov"
 fi
