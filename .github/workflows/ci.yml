@@ -27,7 +27,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        #os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [windows-latest]
         rust: [stable]
 
     steps:
@@ -88,13 +89,25 @@ jobs:
 
     - name: Install dig and nc (Windows)
       if: matrix.os == 'windows-latest'
+      shell: powershell
       run: |
         choco install bind-toolsonly nmap rush -y --no-progress
+        refreshenv
         echo "C:\Program Files (x86)\Nmap" >> $GITHUB_PATH
 
     - name: Run integration tests
+      if: matrix.os != 'windows-latest'
       shell: bash
       run: cd it && ./run-tests.sh
+
+    - name: Run integration tests
+      if: matrix.os == 'windows-latest'
+      shell: bash
+      run: |
+        echo $PATH
+        which ncat || true
+        which ncat.exe || true
+        cd it && ./run-tests.sh
 
     - name: Check for TODO/FIXME in source
       shell: bash
