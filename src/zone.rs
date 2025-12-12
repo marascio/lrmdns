@@ -96,15 +96,27 @@ impl Zone {
         // Start with SOA
         records.push(self.get_soa_record());
 
-        // Add all other records (excluding SOA to avoid duplication)
-        for record_map in self.records.values() {
-            for (record_type, record_vec) in record_map.iter() {
-                // Skip SOA records - they're already added at start/end
-                if *record_type == RecordType::SOA {
-                    continue;
-                }
-                for record in record_vec {
-                    records.push(record.clone());
+        // Collect all names and sort them canonically for deterministic AXFR ordering
+        let mut sorted_names: Vec<_> = self.records.keys().collect();
+        sorted_names.sort();
+
+        // Add all other records in canonical order (by name, then by type)
+        for name in sorted_names {
+            if let Some(record_map) = self.records.get(name) {
+                // Sort record types within each name for deterministic ordering
+                let mut sorted_types: Vec<_> = record_map.keys().collect();
+                sorted_types.sort();
+
+                for record_type in sorted_types {
+                    // Skip SOA records - they're already added at start/end
+                    if *record_type == RecordType::SOA {
+                        continue;
+                    }
+                    if let Some(record_vec) = record_map.get(record_type) {
+                        for record in record_vec {
+                            records.push(record.clone());
+                        }
+                    }
                 }
             }
         }
@@ -2057,5 +2069,82 @@ $TTL 3600
         // Verify structure: first and last should be SOA
         assert_eq!(all_records.first().unwrap().record_type(), RecordType::SOA);
         assert_eq!(all_records.last().unwrap().record_type(), RecordType::SOA);
+    }
+
+    #[test]
+    fn test_get_all_records_canonical_ordering() {
+        // Bug: get_all_records uses HashMap iteration which doesn't guarantee
+        // canonical ordering. RFC 5936 expects AXFR to use a predictable order.
+        let origin = Name::from_str("example.com.").unwrap();
+        let soa = SoaRecord {
+            mname: Name::from_str("ns1.example.com.").unwrap(),
+            rname: Name::from_str("admin.example.com.").unwrap(),
+            serial: 1,
+            refresh: 7200,
+            retry: 3600,
+            expire: 1209600,
+            minimum: 86400,
+        };
+        let mut zone = Zone::new(origin.clone(), soa);
+
+        // Add records in non-alphabetical order to verify sorting
+        zone.add_record(Record::from_rdata(
+            Name::from_str("zzz.example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 1))),
+        ));
+        zone.add_record(Record::from_rdata(
+            Name::from_str("aaa.example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 2))),
+        ));
+        zone.add_record(Record::from_rdata(
+            Name::from_str("mmm.example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 3))),
+        ));
+        // Add multiple record types for the same name (should be ordered by type)
+        zone.add_record(Record::from_rdata(
+            Name::from_str("multi.example.com.").unwrap(),
+            300,
+            RData::AAAA(hickory_proto::rr::rdata::AAAA(Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 1,
+            ))),
+        ));
+        zone.add_record(Record::from_rdata(
+            Name::from_str("multi.example.com.").unwrap(),
+            300,
+            RData::A(hickory_proto::rr::rdata::A(Ipv4Addr::new(192, 0, 2, 4))),
+        ));
+
+        let all_records = zone.get_all_records();
+
+        // Skip first and last SOA records
+        let middle_records: Vec<_> = all_records[1..all_records.len() - 1].to_vec();
+
+        // Extract names
+        let names: Vec<String> = middle_records
+            .iter()
+            .map(|r| r.name().to_string())
+            .collect();
+
+        // Verify names are in canonical (alphabetical) order
+        let mut sorted_names = names.clone();
+        sorted_names.sort();
+        assert_eq!(
+            names, sorted_names,
+            "Records should be in canonical (alphabetical) order by name"
+        );
+
+        // For records with same name, verify they're ordered by type
+        let multi_records: Vec<_> = middle_records
+            .iter()
+            .filter(|r| r.name().to_string() == "multi.example.com.")
+            .collect();
+        if multi_records.len() >= 2 {
+            // A (1) should come before AAAA (28) numerically
+            assert_eq!(multi_records[0].record_type(), RecordType::A);
+            assert_eq!(multi_records[1].record_type(), RecordType::AAAA);
+        }
     }
 }
