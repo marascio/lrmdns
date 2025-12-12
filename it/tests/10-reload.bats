@@ -8,6 +8,11 @@ load '../bats/test_helper/bats-assert/load'
 # Tests for zone reloading via SIGHUP signal (Unix only)
 
 setup() {
+    # Skip on Windows - SIGHUP is not supported
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+        skip "SIGHUP signal not supported on Windows"
+    fi
+
     # Create test-specific files in BATS_TEST_TMPDIR for automatic isolation and cleanup
     TEST_ZONE="$BATS_TEST_TMPDIR/example.zone"
     TEST_CONFIG="$BATS_TEST_TMPDIR/config.yaml"
