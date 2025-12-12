@@ -160,17 +160,20 @@ echo
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ] && [ ! -f "$LRMDNS_BIN" ]; then
     if [ "$ENABLE_COVERAGE" = true ]; then
         echo "Building lrmdns with coverage instrumentation (${BUILD_PROFILE})..."
+        # Use 'cargo llvm-cov run' to build an instrumented binary
+        # The --bin flag ensures we build the binary, not just run tests
+        # Need to run from project root where Cargo.toml is
         if [ "$BUILD_PROFILE" = "release" ]; then
-            cargo llvm-cov --no-report --release
+            (cd .. && cargo llvm-cov run --bin lrmdns --release --no-report -- --help) > /dev/null 2>&1
         else
-            cargo llvm-cov --no-report
+            (cd .. && cargo llvm-cov run --bin lrmdns --no-report -- --help) > /dev/null 2>&1
         fi
     else
         echo "Building lrmdns (${BUILD_PROFILE})..."
         if [ "$BUILD_PROFILE" = "release" ]; then
-            cargo build --release
+            (cd .. && cargo build --release)
         else
-            cargo build
+            (cd .. && cargo build)
         fi
     fi
 fi
@@ -189,6 +192,7 @@ fi
 if [ "$ENABLE_COVERAGE" = true ]; then
     echo
     echo "Generating coverage report..."
-    cargo llvm-cov report --lcov --output-path coverage.lcov
+    # Need to run from project root where Cargo.toml is
+    (cd .. && cargo llvm-cov report --lcov --output-path it/coverage.lcov)
     echo "Coverage report written to: it/coverage.lcov"
 fi
