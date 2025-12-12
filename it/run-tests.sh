@@ -40,6 +40,17 @@ if [ "$RUN_SERIAL" = false ] && [ -z "$PARALLEL_JOBS" ]; then
     fi
 fi
 
+# Check if GNU parallel is available (required for BATS --jobs flag)
+# If not available, fall back to serial execution
+if [ "$RUN_SERIAL" = false ] && ! command -v parallel &>/dev/null; then
+    echo "Warning: GNU parallel not found. Falling back to serial execution."
+    echo "  To enable parallel testing, install GNU parallel:"
+    echo "    - Ubuntu/Debian: sudo apt-get install parallel"
+    echo "    - macOS: brew install parallel"
+    echo "    - Windows: choco install parallel"
+    RUN_SERIAL=true
+fi
+
 # Check prerequisites
 ./scripts/validate-setup.sh
 
