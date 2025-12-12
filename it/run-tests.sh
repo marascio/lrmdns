@@ -5,14 +5,50 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Show help
+show_help() {
+    cat << EOF
+Usage: run-tests.sh [OPTIONS] [BATS_ARGS...]
+
+Run lrmdns integration tests using BATS.
+
+OPTIONS:
+  -h, --help              Show this help message and exit
+  -j, --jobs N            Run tests in parallel with N jobs (default: auto-detect CPUs)
+  -s, --serial            Run tests serially (disables parallelization)
+  -t, --timeout SECONDS   Set test timeout in seconds (default: 60)
+
+BATS_ARGS:
+  Additional arguments passed directly to BATS (e.g., test file patterns)
+
+EXAMPLES:
+  run-tests.sh                           Run all tests in parallel
+  run-tests.sh --serial                  Run all tests serially
+  run-tests.sh --jobs 4                  Run with 4 parallel jobs
+  run-tests.sh --timeout 120             Set 120 second timeout
+  run-tests.sh tests/01-basic-queries.bats  Run specific test file
+
+ENVIRONMENT:
+  BATS_TEST_TIMEOUT       Test timeout (set via --timeout or defaults to 60)
+
+EOF
+}
+
 # Parse arguments
-# Default: run in parallel (auto-detect CPUs)
+# Default: run in parallel (auto-detect CPUs), 60 second timeout
 PARALLEL_JOBS=""
 RUN_SERIAL=false
 BATS_ARGS=()
 
+# Use existing BATS_TEST_TIMEOUT from environment, or default to 60
+: "${BATS_TEST_TIMEOUT:=60}"
+
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
         -j|--jobs)
             PARALLEL_JOBS="$2"
             RUN_SERIAL=false
@@ -22,12 +58,19 @@ while [[ $# -gt 0 ]]; do
             RUN_SERIAL=true
             shift
             ;;
+        -t|--timeout)
+            BATS_TEST_TIMEOUT="$2"
+            shift 2
+            ;;
         *)
             BATS_ARGS+=("$1")
             shift
             ;;
     esac
 done
+
+# Export BATS_TEST_TIMEOUT for BATS to use
+export BATS_TEST_TIMEOUT
 
 # Auto-detect number of CPUs if not set and not running serially
 if [ "$RUN_SERIAL" = false ] && [ -z "$PARALLEL_JOBS" ]; then
@@ -60,15 +103,26 @@ if [ ! -f "../target/release/lrmdns" ]; then
     (cd .. && cargo build --release)
 fi
 
+# Print test configuration summary
+echo "Integration Test Configuration"
+echo "------------------------------"
+printf "Platform : %s\n" "${OSTYPE}"
+if [ "$RUN_SERIAL" = true ] || [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    printf "    Mode : %s\n" "Serial"
+    printf "    Jobs : %s\n" "1"
+else
+    printf "    Mode : %s\n" "Parallel"
+    printf "    Jobs : %s\n" "${PARALLEL_JOBS}"
+fi
+printf " Timeout : %ss\n" "${BATS_TEST_TIMEOUT}"
+echo
+
 # Run BATS tests
 # On Windows (msys/cygwin), always run serially due to tooling limitations
 if [ "$RUN_SERIAL" = true ]; then
-    echo "Running integration tests..."
     bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    echo "Running integration tests (serial on Windows)..."
     bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 else
-    echo "Running integration tests in parallel (${PARALLEL_JOBS} jobs)..."
     bats/bats-core/bin/bats --jobs "$PARALLEL_JOBS" tests/*.bats "${BATS_ARGS[@]}"
 fi
