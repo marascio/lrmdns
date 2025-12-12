@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Run all integration tests
 
-set -x
 set -e
 
 cd "$(dirname "$0")"
@@ -62,13 +61,13 @@ if [ ! -f "../target/release/lrmdns" ]; then
 fi
 
 # Run BATS tests
-# On Windows (msys/cygwin), use --no-parallelize-within-files to avoid flock requirement
+# On Windows (msys/cygwin), always run serially due to tooling limitations
 if [ "$RUN_SERIAL" = true ]; then
     echo "Running integration tests..."
     bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    echo "Running integration tests in parallel (${PARALLEL_JOBS} jobs, per-file on Windows)..."
-    bats/bats-core/bin/bats --jobs "$PARALLEL_JOBS" --no-parallelize-within-files tests/*.bats "${BATS_ARGS[@]}"
+    echo "Running integration tests (serial on Windows)..."
+    bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 else
     echo "Running integration tests in parallel (${PARALLEL_JOBS} jobs)..."
     bats/bats-core/bin/bats --jobs "$PARALLEL_JOBS" tests/*.bats "${BATS_ARGS[@]}"
