@@ -17,6 +17,7 @@ OPTIONS:
   -j, --jobs N            Run tests in parallel with N jobs (default: auto-detect CPUs)
   -s, --serial            Run tests serially (disables parallelization)
   -t, --timeout SECONDS   Set test timeout in seconds (default: 60)
+  -p, --profile PROFILE   Build profile: release or debug (default: release)
 
 BATS_ARGS:
   Additional arguments passed directly to BATS (e.g., test file patterns)
@@ -26,22 +27,32 @@ EXAMPLES:
   run-tests.sh --serial                  Run all tests serially
   run-tests.sh --jobs 4                  Run with 4 parallel jobs
   run-tests.sh --timeout 120             Set 120 second timeout
+  run-tests.sh --profile debug           Run tests with debug binary
   run-tests.sh tests/01-basic-queries.bats  Run specific test file
 
 ENVIRONMENT:
   BATS_TEST_TIMEOUT       Test timeout (set via --timeout or defaults to 60)
+  LRMDNS_BIN              Path to lrmdns binary (overrides --profile)
 
 EOF
 }
 
 # Parse arguments
-# Default: run in parallel (auto-detect CPUs), 60 second timeout
+# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile
 PARALLEL_JOBS=""
 RUN_SERIAL=false
+BUILD_PROFILE="release"
 BATS_ARGS=()
 
 # Use existing BATS_TEST_TIMEOUT from environment, or default to 60
 : "${BATS_TEST_TIMEOUT:=60}"
+
+# Check if LRMDNS_BIN is already set
+if [ -n "$LRMDNS_BIN" ]; then
+    LRMDNS_BIN_SOURCE="environment"
+else
+    LRMDNS_BIN_SOURCE="profile"
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -62,12 +73,21 @@ while [[ $# -gt 0 ]]; do
             BATS_TEST_TIMEOUT="$2"
             shift 2
             ;;
+        -p|--profile)
+            BUILD_PROFILE="$2"
+            shift 2
+            ;;
         *)
             BATS_ARGS+=("$1")
             shift
             ;;
     esac
 done
+
+# Set LRMDNS_BIN if not already set in environment
+if [ "$LRMDNS_BIN_SOURCE" = "profile" ]; then
+    export LRMDNS_BIN="../target/${BUILD_PROFILE}/lrmdns"
+fi
 
 # Export BATS_TEST_TIMEOUT for BATS to use
 export BATS_TEST_TIMEOUT
@@ -94,15 +114,6 @@ if [ "$RUN_SERIAL" = false ] && ! command -v parallel &>/dev/null && ! command -
     RUN_SERIAL=true
 fi
 
-# Check prerequisites
-./scripts/validate-setup.sh
-
-# Build lrmdns if needed
-if [ ! -f "../target/release/lrmdns" ]; then
-    echo "Building lrmdns..."
-    (cd .. && cargo build --release)
-fi
-
 # Print test configuration summary
 echo "Integration Test Configuration"
 echo "------------------------------"
@@ -115,7 +126,25 @@ else
     printf "    Jobs : %s\n" "${PARALLEL_JOBS}"
 fi
 printf " Timeout : %ss\n" "${BATS_TEST_TIMEOUT}"
+if [ "$LRMDNS_BIN_SOURCE" = "environment" ]; then
+    printf "  Binary : %s (from environment)\n" "${LRMDNS_BIN}"
+else
+    printf "  Binary : %s (%s)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
+fi
 echo
+
+# Check prerequisites
+./scripts/validate-setup.sh
+
+# Build lrmdns if needed (only when using profile-based path)
+if [ "$LRMDNS_BIN_SOURCE" = "profile" ] && [ ! -f "$LRMDNS_BIN" ]; then
+    echo "Building lrmdns (${BUILD_PROFILE})..."
+    if [ "$BUILD_PROFILE" = "release" ]; then
+        cargo build --release
+    else
+        cargo build
+    fi
+fi
 
 # Run BATS tests
 # On Windows (msys/cygwin), always run serially due to tooling limitations
