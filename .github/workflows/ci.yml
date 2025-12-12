@@ -61,23 +61,23 @@ jobs:
         path: target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-    #- name: Check formatting
-    #  run: cargo fmt --all -- --check
+    - name: Check formatting
+      run: cargo fmt --all -- --check
 
-    #- name: Run clippy
-    #  run: cargo clippy --all-targets --all-features -- -D warnings
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
 
-    #- name: Build (debug)
-    #  run: cargo build --verbose
+    - name: Build (debug)
+      run: cargo build --verbose
 
-    #- name: Build (release)
-    #  run: cargo build --release --verbose
+    - name: Build (release)
+      run: cargo build --release --verbose
 
-    #- name: Run unit tests (debug)
-    #  run: cargo test --verbose
+    - name: Run unit tests (debug)
+      run: cargo test --verbose
 
-    #- name: Run unit tests (release)
-    #  run: cargo test --release --verbose
+    - name: Run unit tests (release)
+      run: cargo test --release --verbose
 
     - name: Install dig and nc (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
