@@ -94,7 +94,7 @@ jobs:
 
     - name: Install rush for parallel testing (Windows)
       if: matrix.os == 'windows-latest'
-      run: cargo install --no-default-features --features rustls rush-cli
+      run: cargo install rush-cli
 
     - name: Run integration tests
       if: matrix.os != 'windows-latest'
