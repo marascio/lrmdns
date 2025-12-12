@@ -88,7 +88,9 @@ jobs:
 
     - name: Install dig and nc (Windows)
       if: matrix.os == 'windows-latest'
-      run: choco install bind-toolsonly nmap -y --no-progress
+      run: |
+        choco install bind-toolsonly nmap -y --no-progress
+        echo "C:\Program Files (x86)\Nmap" >> $GITHUB_PATH
 
     - name: Install rush for parallel testing (Windows)
       if: matrix.os == 'windows-latest'
