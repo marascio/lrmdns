@@ -129,7 +129,18 @@ jobs:
     - name: Setup the environment for coverage using llvm-cov
       run: |
         source <(cargo llvm-cov show-env)
-        for i in $(cargo llvm-cov show-env 2>/dev/null | cut -d= -f1); do echo "$i=${!i}"; done >> $GITHUB_ENV
+        for i in $(cargo llvm-cov show-env 2>/dev/null | cut -d= -f1); do
+          echo "$i=${!i}";
+        done >> $GITHUB_ENV
+        cargo llvm-cov clean --workspace
+
+    - name: Ensure clean llvm-cov workspace
+      run: |
+        if [ $(find $CARGO_LLVM_COV_TARGET_DIR -name '*.profraw' 2>/dev/null | wc -l) != 0 ]; then
+          echo "error: existing profraw files found"
+          ls -l $CARGO_LLVM_COV_TARGET_DIR/*.profraw
+          exit 1
+        fi
 
     - name: Build with coverage
       run: cargo build --release
