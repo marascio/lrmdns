@@ -13,6 +13,7 @@ readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 hickory-proto = { version = "0.24", features = ["dnssec"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

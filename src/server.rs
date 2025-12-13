@@ -40,17 +40,27 @@ impl DnsServer {
         }
     }
 
-    pub async fn run(&self) -> Result<()> {
-        let udp_future = self.run_udp();
-        let tcp_future = self.run_tcp();
+    pub async fn run(&self, shutdown_token: tokio_util::sync::CancellationToken) -> Result<()> {
+        let udp_future = self.run_udp(shutdown_token.clone());
+        let tcp_future = self.run_tcp(shutdown_token.clone());
 
-        // Run both servers concurrently
-        tokio::try_join!(udp_future, tcp_future)?;
+        // Run both servers concurrently until shutdown is requested
+        tokio::select! {
+            result = udp_future => {
+                result?;
+            }
+            result = tcp_future => {
+                result?;
+            }
+            _ = shutdown_token.cancelled() => {
+                tracing::info!("Shutdown signal received, stopping servers");
+            }
+        }
 
         Ok(())
     }
 
-    async fn run_udp(&self) -> Result<()> {
+    async fn run_udp(&self, shutdown_token: tokio_util::sync::CancellationToken) -> Result<()> {
         let socket = UdpSocket::bind(&self.listen_addr)
             .await
             .context(format!("Failed to bind UDP to {}", self.listen_addr))?;
@@ -63,33 +73,41 @@ impl DnsServer {
         let mut buf = vec![0u8; MAX_UDP_RECV_SIZE];
 
         loop {
-            match socket.recv_from(&mut buf).await {
-                Ok((len, addr)) => {
-                    let data = buf[..len].to_vec();
-                    let processor = self.processor.clone();
-                    let socket = socket.clone();
+            tokio::select! {
+                result = socket.recv_from(&mut buf) => {
+                    match result {
+                        Ok((len, addr)) => {
+                            let data = buf[..len].to_vec();
+                            let processor = self.processor.clone();
+                            let socket = socket.clone();
 
-                    let metrics = self.metrics.clone();
-                    let rate_limiter = self.rate_limiter.clone();
+                            let metrics = self.metrics.clone();
+                            let rate_limiter = self.rate_limiter.clone();
 
-                    // Spawn a task to handle the query
-                    tokio::spawn(async move {
-                        if let Err(e) =
-                            handle_udp_query(data, addr, processor, socket, metrics, rate_limiter)
-                                .await
-                        {
-                            tracing::error!("Error handling UDP query from {}: {}", addr, e);
+                            // Spawn a task to handle the query
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    handle_udp_query(data, addr, processor, socket, metrics, rate_limiter)
+                                        .await
+                                {
+                                    tracing::error!("Error handling UDP query from {}: {}", addr, e);
+                                }
+                            });
                         }
-                    });
+                        Err(e) => {
+                            tracing::error!("Error receiving UDP packet: {}", e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Error receiving UDP packet: {}", e);
+                _ = shutdown_token.cancelled() => {
+                    tracing::info!("UDP server shutting down");
+                    return Ok(());
                 }
             }
         }
     }
 
-    async fn run_tcp(&self) -> Result<()> {
+    async fn run_tcp(&self, shutdown_token: tokio_util::sync::CancellationToken) -> Result<()> {
         let listener = TcpListener::bind(&self.listen_addr)
             .await
             .context(format!("Failed to bind TCP to {}", self.listen_addr))?;
@@ -97,33 +115,41 @@ impl DnsServer {
         tracing::info!("DNS server listening on {} (TCP)", self.listen_addr);
 
         loop {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    let processor = self.processor.clone();
-                    let metrics = self.metrics.clone();
-                    let rate_limiter = self.rate_limiter.clone();
-                    let zones = processor.get_zones();
-                    let tcp_config = self.tcp_config.clone();
+            tokio::select! {
+                result = listener.accept() => {
+                    match result {
+                        Ok((stream, addr)) => {
+                            let processor = self.processor.clone();
+                            let metrics = self.metrics.clone();
+                            let rate_limiter = self.rate_limiter.clone();
+                            let zones = processor.get_zones();
+                            let tcp_config = self.tcp_config.clone();
 
-                    // Spawn a task to handle the connection
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_tcp_connection(
-                            stream,
-                            addr,
-                            processor,
-                            metrics,
-                            rate_limiter,
-                            zones,
-                            tcp_config,
-                        )
-                        .await
-                        {
-                            tracing::error!("Error handling TCP connection from {}: {}", addr, e);
+                            // Spawn a task to handle the connection
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_tcp_connection(
+                                    stream,
+                                    addr,
+                                    processor,
+                                    metrics,
+                                    rate_limiter,
+                                    zones,
+                                    tcp_config,
+                                )
+                                .await
+                                {
+                                    tracing::error!("Error handling TCP connection from {}: {}", addr, e);
+                                }
+                            });
                         }
-                    });
+                        Err(e) => {
+                            tracing::error!("Error accepting TCP connection: {}", e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Error accepting TCP connection: {}", e);
+                _ = shutdown_token.cancelled() => {
+                    tracing::info!("TCP server shutting down");
+                    return Ok(());
                 }
             }
         }

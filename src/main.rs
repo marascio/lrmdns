@@ -100,18 +100,28 @@ async fn main() -> Result<()> {
         });
     }
 
+    // Create a cancellation token for graceful shutdown
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+
     // Set up signal handlers
     let config_for_reload = config.clone();
     let zone_store_for_reload = zone_store.clone();
     let metrics_for_stats = metrics.clone();
+    let shutdown_token_for_signals = shutdown_token.clone();
 
     // Spawn signal handler tasks
     tokio::spawn(async move {
-        handle_signals(config_for_reload, zone_store_for_reload, metrics_for_stats).await;
+        handle_signals(
+            config_for_reload,
+            zone_store_for_reload,
+            metrics_for_stats,
+            shutdown_token_for_signals,
+        )
+        .await;
     });
 
-    // Run the DNS server
-    server.run().await
+    // Run the DNS server with shutdown token
+    server.run(shutdown_token).await
 }
 
 fn load_zones(config: &Config) -> Result<ZoneStore> {
@@ -140,12 +150,19 @@ fn load_zones(config: &Config) -> Result<ZoneStore> {
 }
 
 #[cfg(unix)]
-async fn handle_signals(config: Config, zone_store: Arc<RwLock<ZoneStore>>, metrics: Arc<Metrics>) {
+async fn handle_signals(
+    config: Config,
+    zone_store: Arc<RwLock<ZoneStore>>,
+    metrics: Arc<Metrics>,
+    shutdown_token: tokio_util::sync::CancellationToken,
+) {
     use tokio::signal::unix::{SignalKind, signal};
 
     let mut sighup = signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
     let mut sigusr1 =
         signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
+    let mut sigquit = signal(SignalKind::quit()).expect("Failed to register SIGQUIT handler");
 
     loop {
         tokio::select! {
@@ -166,6 +183,18 @@ async fn handle_signals(config: Config, zone_store: Arc<RwLock<ZoneStore>>, metr
                 tracing::info!("Received SIGUSR1, logging metrics...");
                 metrics.log_summary();
             }
+            _ = sigint.recv() => {
+                tracing::info!("Received SIGINT, shutting down gracefully...");
+                metrics.log_summary();
+                shutdown_token.cancel();
+                break;
+            }
+            _ = sigquit.recv() => {
+                tracing::info!("Received SIGQUIT, shutting down gracefully...");
+                metrics.log_summary();
+                shutdown_token.cancel();
+                break;
+            }
         }
     }
 }
@@ -175,10 +204,11 @@ async fn handle_signals(
     _config: Config,
     _zone_store: Arc<RwLock<ZoneStore>>,
     metrics: Arc<Metrics>,
+    shutdown_token: tokio_util::sync::CancellationToken,
 ) {
     // On non-Unix platforms, just wait for Ctrl+C
     tokio::signal::ctrl_c().await.ok();
-    tracing::info!("Shutting down...");
+    tracing::info!("Received Ctrl+C, shutting down gracefully...");
     metrics.log_summary();
-    std::process::exit(0);
+    shutdown_token.cancel();
 }
