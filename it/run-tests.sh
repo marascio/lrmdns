@@ -19,7 +19,7 @@ OPTIONS:
   -t, --timeout SECONDS   Set test timeout in seconds (default: 60)
   -d, --debug             Build profile debug
   -r, --release           Build profile release
-  -p, --profile PROFILE   Build profile: release or debug (default: release)
+  -p, --profile PROFILE   Build profile: release or debug (default: debug)
 
 BATS_ARGS:
   Additional arguments passed directly to BATS (e.g., test file patterns)
@@ -40,10 +40,10 @@ EOF
 }
 
 # Parse arguments
-# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile
+# Default: run in parallel (auto-detect CPUs), 60 second timeout, debug profile
 PARALLEL_JOBS=""
 RUN_SERIAL=false
-BUILD_PROFILE="release"
+BUILD_PROFILE="debug"
 BATS_ARGS=()
 
 # Use existing BATS_TEST_TIMEOUT from environment, or default to 60
@@ -149,7 +149,11 @@ echo
 # Build lrmdns if needed (only when using profile-based path)
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ] && [ ! -f "$LRMDNS_BIN" ]; then
     echo "Building lrmdns (${BUILD_PROFILE})..."
-    (cd .. && cargo build --${BUILD_PROFILE})
+    if [ "$BUILD_PROFILE" = "debug" ]; then
+        (cd .. && cargo build)
+    else
+        (cd .. && cargo build --release)
+    fi
 fi
 
 # Run BATS tests

@@ -114,23 +114,23 @@ jobs:
     - name: Install cargo-llvm-cov
       run: cargo install cargo-llvm-cov
 
-    # - name: Cache cargo registry
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: ~/.cargo/registry
-    #     key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
-    # - name: Cache cargo index
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: ~/.cargo/git
-    #     key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
-    # - name: Cache cargo build (coverage)
-    #   uses: actions/cache@v4
-    #   with:
-    #     path: target
-    #     key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache cargo build (coverage)
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Install dig and nc
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
@@ -153,19 +153,19 @@ jobs:
         fi
 
     - name: Build with coverage
-      run: cargo build --release
+      run: cargo build --verbose
 
     - name: Generate unit test coverage
-      run: cargo test --release
+      run: cargo test --verbose
 
     - name: Generate integration test coverage
-      run: it/run-tests.sh --release
+      run: it/run-tests.sh
 
     - name: Display coverage information
-      run: cargo llvm-cov report --release
+      run: cargo llvm-cov report
 
     - name: Create lcov coverage file for upload
-      run: cargo llvm-cov report --release --lcov --output-path coverage.lcov
+      run: cargo llvm-cov report --lcov --output-path coverage.lcov
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
