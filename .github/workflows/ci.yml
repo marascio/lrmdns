@@ -114,23 +114,23 @@ jobs:
     - name: Install cargo-llvm-cov
       run: cargo install cargo-llvm-cov
 
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    # - name: Cache cargo registry
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: ~/.cargo/registry
+    #     key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Cache cargo index
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    # - name: Cache cargo index
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: ~/.cargo/git
+    #     key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Cache cargo build (coverage)
-      uses: actions/cache@v4
-      with:
-        path: target
-        key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
+    # - name: Cache cargo build (coverage)
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: target
+    #     key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Install dig and nc
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
