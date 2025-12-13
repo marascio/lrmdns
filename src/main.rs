@@ -163,6 +163,7 @@ async fn handle_signals(
         signal(SignalKind::user_defined1()).expect("Failed to register SIGUSR1 handler");
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
     let mut sigquit = signal(SignalKind::quit()).expect("Failed to register SIGQUIT handler");
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
 
     loop {
         tokio::select! {
@@ -191,6 +192,12 @@ async fn handle_signals(
             }
             _ = sigquit.recv() => {
                 tracing::info!("Received SIGQUIT, shutting down gracefully...");
+                metrics.log_summary();
+                shutdown_token.cancel();
+                break;
+            }
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, shutting down gracefully...");
                 metrics.log_summary();
                 shutdown_token.cancel();
                 break;
