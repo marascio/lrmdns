@@ -126,19 +126,10 @@ jobs:
     - name: Install dig and nc
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
-    - name: Setup llvm-cov for coverage
+    - name: Setup the environment for coverage using llvm-cov
       run: |
         source <(cargo llvm-cov show-env)
         for i in $(cargo llvm-cov show-env 2>/dev/null | cut -d= -f1); do echo "$i=${!i}"; done >> $GITHUB_ENV
-
-        #echo RUSTFLAGS='-C instrument-coverage --cfg=coverage --cfg=trybuild_no_target' >> $GITHUB_ENV
-        #echo LLVM_PROFILE_FILE='/home/runner/work/lrmdns/lrmdns/target/lrmdns-%p-%4m.profraw' >> $GITHUB_ENV
-        #echo "CARGO_LLVM_COV=1" >> $GITHUB_ENV
-        #echo "CARGO_LLVM_COV_SHOW_ENV=1" >> $GITHUB_ENV
-        #echo "CARGO_LLVM_COV_TARGET_DIR=/home/runner/work/lrmdns/lrmdns/target" >> $GITHUB_ENV
-        #echo "CARGO_LLVM_COV_BUILD_DIR=/home/runner/work/lrmdns/lrmdns/target" >> $GITHUB_ENV
-        
-      #run: cargo llvm-cov show-env >> $GITHUB_ENV
 
     - name: Build with coverage
       run: cargo build --release
@@ -149,7 +140,10 @@ jobs:
     - name: Generate integration test coverage
       run: it/run-tests.sh --release
 
-    - name: Merge coverage reports
+    - name: Display coverage information
+      run: cargo llvm-cov report --release
+
+    - name: Create lcov coverage file for upload
       run: cargo llvm-cov report --release --lcov --output-path coverage.lcov
 
     - name: Upload coverage to Codecov
