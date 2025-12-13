@@ -127,7 +127,15 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
     - name: Setup llvm-cov for coverage
-      run: cargo llvm-cov show-env >> $GITHUB_ENV
+      run: |
+        echo "RUSTFLAGS=\'-C instrument-coverage --cfg=coverage --cfg=trybuild_no_target\'" >> $GITHUB_ENV
+        echo "LLVM_PROFILE_FILE=\'/home/runner/work/lrmdns/lrmdns/target/lrmdns-%p-%4m.profraw\'" >> $GITHUB_ENV
+        echo "CARGO_LLVM_COV=1" >> $GITHUB_ENV
+        echo "CARGO_LLVM_COV_SHOW_ENV=1" >> $GITHUB_ENV
+        echo "CARGO_LLVM_COV_TARGET_DIR=/home/runner/work/lrmdns/lrmdns/target" >> $GITHUB_ENV
+        echo "CARGO_LLVM_COV_BUILD_DIR=/home/runner/work/lrmdns/lrmdns/target" >> $GITHUB_ENV
+        
+      #run: cargo llvm-cov show-env >> $GITHUB_ENV
 
     - name: Build with coverage
       run: cargo build --release
