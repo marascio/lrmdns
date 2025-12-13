@@ -126,20 +126,19 @@ jobs:
     - name: Install dig and nc
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
-    - name: Build with coverage
+    - name: Setup llvm-cov for coverage
       run: |
         source <(cargo llvm-cov show-env --export-prefix)
-        cargo build --release
+        source <(cargo llvm-cov show-env --export-prefix 2>/dev/null | sed 's/^export \(.*\)$/echo "export \1" >> $GITHUB_ENV/')
+
+    - name: Build with coverage
+      run: cargo build --release
 
     - name: Generate unit test coverage
-      run: |
-        source <(cargo llvm-cov show-env --export-prefix)
-        cargo test --release
+      run: cargo test --release
 
     - name: Generate integration test coverage
-      run: |
-        source <(cargo llvm-cov show-env --export-prefix)
-        it/run-tests.sh --profile release
+      run: it/run-tests.sh --profile release
 
     - name: Merge coverage reports
       run: cargo llvm-cov report --release --lcov --output-path coverage.lcov
