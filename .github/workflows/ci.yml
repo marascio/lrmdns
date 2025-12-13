@@ -129,7 +129,7 @@ jobs:
     - name: Setup llvm-cov for coverage
       run: |
         source <(cargo llvm-cov show-env --export-prefix)
-        source <(cargo llvm-cov show-env --export-prefix 2>/dev/null | sed 's/^export \(.*\)$/echo "export \1" >> $GITHUB_ENV/')
+        source <(cargo llvm-cov show-env --export-prefix 2>/dev/null | sed 's/^export \(.*\)$/echo "\1" >> $GITHUB_ENV/')
 
     - name: Build with coverage
       run: cargo build --release
@@ -138,7 +138,7 @@ jobs:
       run: cargo test --release
 
     - name: Generate integration test coverage
-      run: it/run-tests.sh --profile release
+      run: it/run-tests.sh --release
 
     - name: Merge coverage reports
       run: cargo llvm-cov report --release --lcov --output-path coverage.lcov
