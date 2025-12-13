@@ -132,7 +132,7 @@ jobs:
         cargo build --release
 
     - name: Generate unit test coverage
-      run: cargo test
+      run: cargo test --release
 
     - name: Generate integration test coverage
       run: it/run-tests.sh --profile release
