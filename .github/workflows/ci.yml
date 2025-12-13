@@ -132,10 +132,14 @@ jobs:
         cargo build --release
 
     - name: Generate unit test coverage
-      run: cargo test --release
+      run: |
+        source <(cargo llvm-cov show-env --export-prefix)
+        cargo test --release
 
     - name: Generate integration test coverage
-      run: it/run-tests.sh --profile release
+      run: |
+        source <(cargo llvm-cov show-env --export-prefix)
+        it/run-tests.sh --profile release
 
     - name: Merge coverage reports
       run: cargo llvm-cov report --release --lcov --output-path coverage.lcov
