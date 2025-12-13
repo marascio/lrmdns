@@ -111,11 +111,8 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache cargo bin (cargo-llvm-cov)
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/bin
-        key: ${{ runner.os }}-cargo-bin-${{ matrix.rust || 'stable' }}-${{ hashFiles('**/Cargo.lock') }}
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -134,9 +131,6 @@ jobs:
       with:
         path: target
         key: ${{ runner.os }}-cargo-build-coverage-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install cargo-llvm-cov
-      run: cargo install cargo-llvm-cov
 
     - name: Install dig and nc
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
