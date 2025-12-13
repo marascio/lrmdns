@@ -127,7 +127,7 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
     - name: Setup llvm-cov for coverage
-      run:
+      run: |
         source <(cargo llvm-cov show-env)
         for i in $(cargo llvm-cov show-env 2>/dev/null | cut -d= -f1); do echo "$i=${!i}"; done >> $GITHUB_ENV
 
