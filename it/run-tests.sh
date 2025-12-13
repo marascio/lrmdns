@@ -17,11 +17,16 @@ OPTIONS:
   -j, --jobs N            Run tests in parallel with N jobs (default: auto-detect CPUs)
   -s, --serial            Run tests serially (disables parallelization)
   -t, --timeout SECONDS   Set test timeout in seconds (default: 60)
+  -d, --debug             Build profile debug
+  -r, --release           Build profile release
   -p, --profile PROFILE   Build profile: release or debug (default: release)
-  -c, --coverage          Generate code coverage report (requires cargo-llvm-cov)
 
 BATS_ARGS:
   Additional arguments passed directly to BATS (e.g., test file patterns)
+
+ENVIRONMENT:
+  BATS_TEST_TIMEOUT       Test timeout (set via --timeout or defaults to 60)
+  LRMDNS_BIN              Path to lrmdns binary (overrides --profile)
 
 EXAMPLES:
   run-tests.sh                           Run all tests in parallel
@@ -29,26 +34,16 @@ EXAMPLES:
   run-tests.sh --jobs 4                  Run with 4 parallel jobs
   run-tests.sh --timeout 120             Set 120 second timeout
   run-tests.sh --profile debug           Run tests with debug binary
-  run-tests.sh --coverage                Generate coverage report
   run-tests.sh tests/01-basic-queries.bats  Run specific test file
-
-ENVIRONMENT:
-  BATS_TEST_TIMEOUT       Test timeout (set via --timeout or defaults to 60)
-  LRMDNS_BIN              Path to lrmdns binary (overrides --profile)
-
-COVERAGE:
-  Coverage requires cargo-llvm-cov: cargo install cargo-llvm-cov
-  Output: coverage.lcov (LCOV format for Codecov)
 
 EOF
 }
 
 # Parse arguments
-# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile, no coverage
+# Default: run in parallel (auto-detect CPUs), 60 second timeout, release profile
 PARALLEL_JOBS=""
 RUN_SERIAL=false
 BUILD_PROFILE="release"
-ENABLE_COVERAGE=false
 BATS_ARGS=()
 
 # Use existing BATS_TEST_TIMEOUT from environment, or default to 60
@@ -74,6 +69,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -s|--serial)
             RUN_SERIAL=true
+            PARALLEL_JOBS="1"
             shift
             ;;
         -t|--timeout)
@@ -84,8 +80,12 @@ while [[ $# -gt 0 ]]; do
             BUILD_PROFILE="$2"
             shift 2
             ;;
-        -c|--coverage)
-            ENABLE_COVERAGE=true
+        -d|--debug)
+            BUILD_PROFILE="debug"
+            shift
+            ;;
+        -r|--release)
+            BUILD_PROFILE="release"
             shift
             ;;
         *)
@@ -95,14 +95,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Set LRMDNS_BIN based on coverage and profile
+# Set LRMDNS_BIN based on profile
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ]; then
-    if [ "$ENABLE_COVERAGE" = true ]; then
-        # cargo-llvm-cov puts instrumented binaries in a different location
-        export LRMDNS_BIN="../target/llvm-cov-target/${BUILD_PROFILE}/lrmdns"
-    else
-        export LRMDNS_BIN="../target/${BUILD_PROFILE}/lrmdns"
-    fi
+    export LRMDNS_BIN="../target/${BUILD_PROFILE}/lrmdns"
 fi
 
 # Export BATS_TEST_TIMEOUT for BATS to use
@@ -124,10 +119,9 @@ fi
 # If neither is available, fall back to serial execution
 if [ "$RUN_SERIAL" = false ] && ! command -v parallel &>/dev/null && ! command -v rush &>/dev/null; then
     echo "Warning: Neither GNU parallel nor rush found. Falling back to serial execution."
-    echo "  To enable parallel testing, install either:"
-    echo "    - GNU parallel: Ubuntu/Debian: sudo apt-get install parallel, macOS: brew install parallel"
-    echo "    - rush: cargo install rush-cli"
+    echo "         To enable parallel testing, install either GNU parallel or shenwei356/rush"
     RUN_SERIAL=true
+    PARALLEL_JOBS="1"
 fi
 
 # Print test configuration summary
@@ -136,20 +130,16 @@ echo "------------------------------"
 printf "Platform : %s\n" "${OSTYPE}"
 if [ "$RUN_SERIAL" = true ] || [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
     printf "    Mode : %s\n" "Serial"
-    printf "    Jobs : %s\n" "1"
 else
     printf "    Mode : %s\n" "Parallel"
-    printf "    Jobs : %s\n" "${PARALLEL_JOBS}"
 fi
+printf "    Jobs : %s\n" "${PARALLEL_JOBS}"
 printf " Timeout : %ss\n" "${BATS_TEST_TIMEOUT}"
+
 if [ "$LRMDNS_BIN_SOURCE" = "environment" ]; then
     printf "  Binary : %s (from environment)\n" "${LRMDNS_BIN}"
 else
-    if [ "$ENABLE_COVERAGE" = true ]; then
-        printf "  Binary : %s (%s, coverage)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
-    else
-        printf "  Binary : %s (%s)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
-    fi
+    printf "  Binary : %s (%s)\n" "${LRMDNS_BIN}" "${BUILD_PROFILE}"
 fi
 echo
 
@@ -158,24 +148,8 @@ echo
 
 # Build lrmdns if needed (only when using profile-based path)
 if [ "$LRMDNS_BIN_SOURCE" = "profile" ] && [ ! -f "$LRMDNS_BIN" ]; then
-    if [ "$ENABLE_COVERAGE" = true ]; then
-        echo "Building lrmdns with coverage instrumentation (${BUILD_PROFILE})..."
-        # Use 'cargo llvm-cov run' to build an instrumented binary
-        # The --bin flag ensures we build the binary, not just run tests
-        # Need to run from project root where Cargo.toml is
-        if [ "$BUILD_PROFILE" = "release" ]; then
-            (cd .. && cargo llvm-cov run --bin lrmdns --release --no-report -- --help) > /dev/null 2>&1
-        else
-            (cd .. && cargo llvm-cov run --bin lrmdns --no-report -- --help) > /dev/null 2>&1
-        fi
-    else
-        echo "Building lrmdns (${BUILD_PROFILE})..."
-        if [ "$BUILD_PROFILE" = "release" ]; then
-            (cd .. && cargo build --release)
-        else
-            (cd .. && cargo build)
-        fi
-    fi
+    echo "Building lrmdns (${BUILD_PROFILE})..."
+    (cd .. && cargo build --${BUILD_PROFILE})
 fi
 
 # Run BATS tests
@@ -186,18 +160,4 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]];
     bats/bats-core/bin/bats tests/*.bats "${BATS_ARGS[@]}"
 else
     bats/bats-core/bin/bats --jobs "$PARALLEL_JOBS" tests/*.bats "${BATS_ARGS[@]}"
-fi
-
-# Generate coverage report if coverage was enabled
-if [ "$ENABLE_COVERAGE" = true ]; then
-    echo
-    echo "Generating coverage report..."
-    # Need to run from project root where Cargo.toml is
-    # Must match the build profile used above
-    if [ "$BUILD_PROFILE" = "release" ]; then
-        (cd .. && cargo llvm-cov report --release --lcov --output-path it/coverage.lcov)
-    else
-        (cd .. && cargo llvm-cov report --lcov --output-path it/coverage.lcov)
-    fi
-    echo "Coverage report written to: it/coverage.lcov"
 fi
