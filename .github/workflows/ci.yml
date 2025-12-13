@@ -127,9 +127,7 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y dnsutils netcat-openbsd
 
     - name: Setup llvm-cov for coverage
-      run: |
-        source <(cargo llvm-cov show-env --export-prefix)
-        source <(cargo llvm-cov show-env --export-prefix 2>/dev/null | sed 's/^export \(.*\)$/echo "\1" >> $GITHUB_ENV/')
+      run: cargo llvm-cov show-env --export-prefix >> $GITHUB_ENV
 
     - name: Build with coverage
       run: cargo build --release
